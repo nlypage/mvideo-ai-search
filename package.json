@@ -5,8 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite dev",
-    "build": "vite build",
-    "build:dev": "vite build --mode development",
+    "build": "VITE_LOW_MEMORY_BUILD=1 bun --smol ./node_modules/vite/bin/vite.js build",
+    "build:full": "vite build",
+    "build:dev": "VITE_LOW_MEMORY_BUILD=1 bun --smol ./node_modules/vite/bin/vite.js build --mode development",
     "preview": "vite preview",
     "lint": "eslint .",
     "format": "prettier --write ."
