@@ -10,7 +10,7 @@ ENV VITE_APP_MODE=${VITE_APP_MODE}
 ENV VITE_LOW_MEMORY_BUILD=${VITE_LOW_MEMORY_BUILD}
 ENV CLOUDFLARE_TELEMETRY_DISABLED=1
 COPY . .
-RUN bun run build
+RUN if [ "$VITE_LOW_MEMORY_BUILD" = "1" ]; then bun run build; else bun run build:full; fi
 
 FROM oven/bun:1-slim AS runner
 WORKDIR /app
