@@ -1,0 +1,37 @@
+services:
+  mvideo-client:
+    build:
+      context: .
+      args:
+        VITE_APP_MODE: client
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      APP_MODE: client
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.openai.com/v1}
+      LLM_MODEL: ${LLM_MODEL:-gpt-5.4-mini}
+      AI_DEBUG: ${AI_DEBUG:-false}
+    ports:
+      - "${CLIENT_PORT:-3000}:3000"
+    restart: unless-stopped
+
+  mvideo-consultant:
+    build:
+      context: .
+      args:
+        VITE_APP_MODE: consultant
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      APP_MODE: consultant
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.openai.com/v1}
+      LLM_MODEL: ${LLM_MODEL:-gpt-5.4-mini}
+      AI_DEBUG: ${AI_DEBUG:-false}
+      CONSULTANT_ACCESS_TOKEN: ${CONSULTANT_ACCESS_TOKEN:-}
+    ports:
+      - "${CONSULTANT_PORT:-3001}:3000"
+    restart: unless-stopped
