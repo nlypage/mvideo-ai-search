@@ -21,21 +21,6 @@ export default defineConfig({
       sourcemap: false,
       reportCompressedSize: false,
       minify: lowMemoryBuild ? false : "esbuild",
-      rollupOptions: {
-        output: {
-          manualChunks(id) {
-            if (!id.includes("node_modules")) return undefined;
-            if (id.includes("react") || id.includes("scheduler")) return "react-vendor";
-            if (id.includes("@radix-ui")) return "radix-ui";
-            if (id.includes("react-markdown") || id.includes("remark") || id.includes("rehype")) {
-              return "markdown";
-            }
-            if (id.includes("recharts") || id.includes("d3-")) return "charts";
-            if (id.includes("date-fns")) return "date-fns";
-            return "vendor";
-          },
-        },
-      },
     },
   },
 });
