@@ -51,29 +51,58 @@ func (c *Client) Search(ctx context.Context, req catalog.SearchRequest) (catalog
 	}
 	offset := clampInt(req.Offset, 0, 0, 1000)
 	limit := clampInt(req.Limit, 24, 1, 36)
+	searchLimit := catalogSearchLimit(limit, req.MaxPrice)
+	maxPages := catalogSearchPages(req.MaxPrice)
 
-	ids, total, err := c.searchProductIDs(ctx, query, offset, limit)
-	if err != nil || len(ids) == 0 {
-		return catalog.SearchResult{Products: []catalog.Product{}, Source: "live", Page: &catalog.Page{Offset: offset, Limit: limit, Total: total}}, err
-	}
+	products := make([]catalog.Product, 0, limit)
+	var total *int
+	lastOffset := offset
+	lastLimit := searchLimit
+	for pageIndex := 0; pageIndex < maxPages && len(products) < limit; pageIndex++ {
+		currentOffset := offset + pageIndex*searchLimit
+		lastOffset = currentOffset
+		lastLimit = searchLimit
+		ids, pageTotal, err := c.searchProductIDs(ctx, query, currentOffset, searchLimit)
+		if total == nil {
+			total = pageTotal
+		}
+		if err != nil {
+			if pageIndex == 0 {
+				return catalog.SearchResult{Products: []catalog.Product{}, Source: "live", Page: &catalog.Page{Offset: offset, Limit: limit, Total: total}}, err
+			}
+			break
+		}
+		if len(ids) == 0 {
+			break
+		}
 
-	details, prices, err := c.hydrateProducts(ctx, ids)
-	if err != nil {
-		return catalog.SearchResult{}, err
-	}
+		details, prices, err := c.hydrateProducts(ctx, ids)
+		if err != nil {
+			if pageIndex == 0 {
+				return catalog.SearchResult{}, err
+			}
+			break
+		}
 
-	products := make([]catalog.Product, 0, len(details))
-	for _, detail := range details {
-		product, ok := c.toProduct(detail, prices[detail.ProductID])
-		if ok && matchesPrice(product, req.MinPrice, req.MaxPrice) {
-			products = append(products, product)
+		for _, detail := range details {
+			product, ok := c.toProduct(detail, prices[detail.ProductID])
+			if ok && matchesPrice(product, req.MinPrice, req.MaxPrice) {
+				products = append(products, product)
+			}
+		}
+		products = dedupeProducts(products)
+		if req.MaxPrice != nil && len(products) > 0 {
+			break
+		}
+		if total == nil || currentOffset+searchLimit >= *total {
+			break
 		}
 	}
-	products = dedupeProducts(products)
+	products = firstCatalogProducts(products, limit)
 
 	page := &catalog.Page{Offset: offset, Limit: limit, Total: total}
-	if total != nil && offset+limit < *total {
-		next := offset + limit
+	if total != nil && lastOffset+lastLimit < *total {
+		next := lastOffset + lastLimit
 		page.NextOffset = &next
 	}
 	return catalog.SearchResult{Products: products, Source: "live", Page: page}, nil
@@ -269,6 +298,27 @@ func defaultHeaders(origin string) map[string]string {
 			"searchType2=2",
 		}, "; "),
 	}
+}
+
+func catalogSearchLimit(limit int, maxPrice *float64) int {
+	if maxPrice != nil && limit < 36 {
+		return 36
+	}
+	return limit
+}
+
+func catalogSearchPages(maxPrice *float64) int {
+	if maxPrice != nil {
+		return 4
+	}
+	return 1
+}
+
+func firstCatalogProducts(products []catalog.Product, limit int) []catalog.Product {
+	if len(products) <= limit {
+		return products
+	}
+	return products[:limit]
 }
 
 func matchesPrice(product catalog.Product, minPrice *float64, maxPrice *float64) bool {

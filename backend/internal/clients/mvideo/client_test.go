@@ -63,6 +63,39 @@ func TestSearchHydratesProducts(t *testing.T) {
 	}
 }
 
+func TestSearchWithMaxPriceExpandsSearchWindow(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/bff/products/v2/search":
+			if r.URL.Query().Get("limit") != "36" {
+				t.Fatalf("search limit = %q, want 36", r.URL.Query().Get("limit"))
+			}
+			_, _ = w.Write([]byte(`{"body":{"total":100,"products":["1","2","3","4","5","6"]}}`))
+		case "/bff/product-details/list":
+			_, _ = w.Write([]byte(`{"body":{"products":[{"productId":"1","name":"Premium Speaker 1","status":{}},{"productId":"2","name":"Premium Speaker 2","status":{}},{"productId":"3","name":"Premium Speaker 3","status":{}},{"productId":"4","name":"Premium Speaker 4","status":{}},{"productId":"5","name":"Premium Speaker 5","status":{}},{"productId":"6","name":"Budget Speaker","status":{}}]}}`))
+		case "/bff/products/prices":
+			_, _ = w.Write([]byte(`{"body":{"materialPrices":[{"productId":"1","price":{"salePrice":10000}},{"productId":"2","price":{"salePrice":11000}},{"productId":"3","price":{"salePrice":12000}},{"productId":"4","price":{"salePrice":13000}},{"productId":"5","price":{"salePrice":14000}},{"productId":"6","price":{"salePrice":3000}}]}}`))
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := &Client{origin: server.URL, imageOrigin: "https://img.example.test", httpClient: server.Client()}
+	maxPrice := 5000.0
+	limit := 5
+	result, err := client.Search(context.Background(), catalog.SearchRequest{Query: "speaker", MaxPrice: &maxPrice, Limit: &limit})
+	if err != nil {
+		t.Fatalf("Search() error = %v", err)
+	}
+	if len(result.Products) != 1 || result.Products[0].ID != "6" || result.Products[0].Price != 3000 {
+		t.Fatalf("unexpected products: %+v", result.Products)
+	}
+	if result.Page == nil || result.Page.NextOffset == nil || *result.Page.NextOffset != 36 {
+		t.Fatalf("unexpected page: %+v", result.Page)
+	}
+}
+
 func TestSearchHydratesDetailsAndPricesConcurrently(t *testing.T) {
 	detailsStarted := make(chan struct{})
 	pricesStarted := make(chan struct{})
