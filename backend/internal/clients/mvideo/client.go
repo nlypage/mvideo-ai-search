@@ -51,9 +51,20 @@ func (c *Client) Search(ctx context.Context, req catalog.SearchRequest) (catalog
 	}
 	offset := clampInt(req.Offset, 0, 0, 1000)
 	limit := clampInt(req.Limit, 24, 1, 36)
-	searchLimit := catalogSearchLimit(limit, req.MaxPrice)
-	maxPages := catalogSearchPages(req.MaxPrice)
+	priceFilter := catalogPriceFilter(req.MinPrice, req.MaxPrice)
 
+	result, err := c.searchProductPages(ctx, req, query, offset, limit, limit, 1, priceFilter)
+	if err != nil || len(result.Products) > 0 || priceFilter == "" {
+		return result, err
+	}
+
+	// M.Video's public page uses /f/price=min-max, but the search BFF can silently
+	// ignore/disable undocumented filters for some queries. Keep a bounded fallback
+	// so budget requests still return useful results, then enforce price locally.
+	return c.searchProductPages(ctx, req, query, offset, limit, catalogSearchLimit(limit, req.MaxPrice), catalogSearchPages(req.MaxPrice), "")
+}
+
+func (c *Client) searchProductPages(ctx context.Context, req catalog.SearchRequest, query string, offset int, limit int, searchLimit int, maxPages int, priceFilter string) (catalog.SearchResult, error) {
 	products := make([]catalog.Product, 0, limit)
 	var total *int
 	lastOffset := offset
@@ -62,7 +73,7 @@ func (c *Client) Search(ctx context.Context, req catalog.SearchRequest) (catalog
 		currentOffset := offset + pageIndex*searchLimit
 		lastOffset = currentOffset
 		lastLimit = searchLimit
-		ids, pageTotal, err := c.searchProductIDs(ctx, query, currentOffset, searchLimit)
+		ids, pageTotal, err := c.searchProductIDs(ctx, query, currentOffset, searchLimit, priceFilter)
 		if total == nil {
 			total = pageTotal
 		}
@@ -143,7 +154,7 @@ func (c *Client) hydrateProducts(ctx context.Context, ids []string) ([]detail, m
 	return detailsRes.items, pricesRes.items, nil
 }
 
-func (c *Client) searchProductIDs(ctx context.Context, query string, offset int, limit int) ([]string, *int, error) {
+func (c *Client) searchProductIDs(ctx context.Context, query string, offset int, limit int, priceFilter string) ([]string, *int, error) {
 	endpoint, err := url.Parse(c.origin + "/bff/products/v2/search")
 	if err != nil {
 		return nil, nil, fmt.Errorf("parse search url: %w", err)
@@ -152,6 +163,9 @@ func (c *Client) searchProductIDs(ctx context.Context, query string, offset int,
 	params.Set("query", query)
 	params.Set("offset", fmt.Sprint(offset))
 	params.Set("limit", fmt.Sprint(limit))
+	if priceFilter != "" {
+		params.Set("price", priceFilter)
+	}
 	endpoint.RawQuery = params.Encode()
 
 	var payload searchResponse
@@ -298,6 +312,24 @@ func defaultHeaders(origin string) map[string]string {
 			"searchType2=2",
 		}, "; "),
 	}
+}
+
+func catalogPriceFilter(minPrice *float64, maxPrice *float64) string {
+	if minPrice == nil && maxPrice == nil {
+		return ""
+	}
+	minValue := 0
+	if minPrice != nil {
+		minValue = intOrZero(*minPrice)
+	}
+	if maxPrice == nil {
+		return fmt.Sprintf("%d-", minValue)
+	}
+	maxValue := intOrZero(*maxPrice)
+	if maxValue <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d-%d", minValue, maxValue)
 }
 
 func catalogSearchLimit(limit int, maxPrice *float64) int {

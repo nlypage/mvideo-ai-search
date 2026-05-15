@@ -64,14 +64,27 @@ func TestSearchHydratesProducts(t *testing.T) {
 }
 
 func TestSearchWithMaxPriceExpandsSearchWindow(t *testing.T) {
+	searchCalls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/bff/products/v2/search":
-			if r.URL.Query().Get("limit") != "36" {
-				t.Fatalf("search limit = %q, want 36", r.URL.Query().Get("limit"))
+			searchCalls++
+			if searchCalls == 1 {
+				if r.URL.Query().Get("limit") != "5" || r.URL.Query().Get("price") != "0-5000" {
+					t.Fatalf("native search query = %s, want limit=5 price=0-5000", r.URL.RawQuery)
+				}
+				_, _ = w.Write([]byte(`{"body":{"total":100,"products":["1","2","3","4","5"]}}`))
+				return
+			}
+			if r.URL.Query().Get("limit") != "36" || r.URL.Query().Get("price") != "" {
+				t.Fatalf("fallback search query = %s, want limit=36 without price", r.URL.RawQuery)
 			}
 			_, _ = w.Write([]byte(`{"body":{"total":100,"products":["1","2","3","4","5","6"]}}`))
 		case "/bff/product-details/list":
+			if searchCalls == 1 {
+				_, _ = w.Write([]byte(`{"body":{"products":[{"productId":"1","name":"Premium Speaker 1","status":{}},{"productId":"2","name":"Premium Speaker 2","status":{}},{"productId":"3","name":"Premium Speaker 3","status":{}},{"productId":"4","name":"Premium Speaker 4","status":{}},{"productId":"5","name":"Premium Speaker 5","status":{}}]}}`))
+				return
+			}
 			_, _ = w.Write([]byte(`{"body":{"products":[{"productId":"1","name":"Premium Speaker 1","status":{}},{"productId":"2","name":"Premium Speaker 2","status":{}},{"productId":"3","name":"Premium Speaker 3","status":{}},{"productId":"4","name":"Premium Speaker 4","status":{}},{"productId":"5","name":"Premium Speaker 5","status":{}},{"productId":"6","name":"Budget Speaker","status":{}}]}}`))
 		case "/bff/products/prices":
 			_, _ = w.Write([]byte(`{"body":{"materialPrices":[{"productId":"1","price":{"salePrice":10000}},{"productId":"2","price":{"salePrice":11000}},{"productId":"3","price":{"salePrice":12000}},{"productId":"4","price":{"salePrice":13000}},{"productId":"5","price":{"salePrice":14000}},{"productId":"6","price":{"salePrice":3000}}]}}`))
