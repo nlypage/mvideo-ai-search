@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/nlypage/mvideo-ai-search/backend/internal/config"
-	catalog "github.com/nlypage/mvideo-ai-search/backend/internal/domain/catalog"
+	"github.com/nlypage/mvideo-ai-search/backend/internal/services/tools"
 )
 
 func TestLiveGiftCatalogSequence(t *testing.T) {
@@ -15,6 +15,7 @@ func TestLiveGiftCatalogSequence(t *testing.T) {
 		t.Skip("set MVIDEO_LIVE_TEST=1 to run live M.Video catalog sequence smoke")
 	}
 	client := New(config.Load(nil))
+	registry := tools.New(client)
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 
@@ -22,10 +23,10 @@ func TestLiveGiftCatalogSequence(t *testing.T) {
 	maxPrice := 5000.0
 	limit := 5
 	for _, query := range queries {
-		result, err := client.Search(ctx, catalog.SearchRequest{Query: query, MaxPrice: &maxPrice, Limit: &limit})
-		t.Logf("query=%q err=%v products=%d page=%+v", query, err, len(result.Products), result.Page)
-		if err != nil || len(result.Products) == 0 {
-			t.Fatalf("Search %q failed: err=%v products=%d", query, err, len(result.Products))
+		result, err := registry.Run(ctx, "search_catalog", tools.Args{Query: query, MaxPrice: &maxPrice, Limit: &limit})
+		t.Logf("query=%q err=%v toolError=%q products=%d page=%+v", query, err, result.Error, len(result.Products), result.Page)
+		if err != nil || result.Error != "" || len(result.Products) == 0 {
+			t.Fatalf("search_catalog %q failed: err=%v toolError=%q products=%d", query, err, result.Error, len(result.Products))
 		}
 	}
 }
