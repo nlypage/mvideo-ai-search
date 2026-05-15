@@ -52,70 +52,31 @@ func (c *Client) Search(ctx context.Context, req catalog.SearchRequest) (catalog
 	offset := clampInt(req.Offset, 0, 0, 1000)
 	limit := clampInt(req.Limit, 24, 1, 36)
 	priceFilter := catalogPriceFilter(req.MinPrice, req.MaxPrice)
-
-	result, err := c.searchProductPages(ctx, req, query, offset, limit, limit, 1, priceFilter)
-	if err != nil || len(result.Products) > 0 || priceFilter == "" {
-		return result, err
-	}
-
-	// M.Video's public page uses /f/price=min-max, but the search BFF can silently
-	// ignore/disable undocumented filters for some queries. Keep a bounded fallback
-	// so budget requests still return useful results, then enforce price locally.
-	return c.searchProductPages(ctx, req, query, offset, limit, catalogSearchLimit(limit, req.MaxPrice), catalogSearchPages(req.MaxPrice), "")
-}
-
-func (c *Client) searchProductPages(ctx context.Context, req catalog.SearchRequest, query string, offset int, limit int, searchLimit int, maxPages int, priceFilter string) (catalog.SearchResult, error) {
-	products := make([]catalog.Product, 0, limit)
-	var total *int
-	lastOffset := offset
-	lastLimit := searchLimit
-	for pageIndex := 0; pageIndex < maxPages && len(products) < limit; pageIndex++ {
-		currentOffset := offset + pageIndex*searchLimit
-		lastOffset = currentOffset
-		lastLimit = searchLimit
-		ids, pageTotal, err := c.searchProductIDs(ctx, query, currentOffset, searchLimit, priceFilter)
-		if total == nil {
-			total = pageTotal
-		}
-		if err != nil {
-			if pageIndex == 0 {
-				return catalog.SearchResult{Products: []catalog.Product{}, Source: "live", Page: &catalog.Page{Offset: offset, Limit: limit, Total: total}}, err
-			}
-			break
-		}
-		if len(ids) == 0 {
-			break
-		}
-
-		details, prices, err := c.hydrateProducts(ctx, ids)
-		if err != nil {
-			if pageIndex == 0 {
-				return catalog.SearchResult{}, err
-			}
-			break
-		}
-
-		for _, detail := range details {
-			product, ok := c.toProduct(detail, prices[detail.ProductID])
-			if ok && matchesPrice(product, req.MinPrice, req.MaxPrice) {
-				products = append(products, product)
-			}
-		}
-		products = dedupeProducts(products)
-		if req.MaxPrice != nil && len(products) > 0 {
-			break
-		}
-		if total == nil || currentOffset+searchLimit >= *total {
-			break
-		}
-	}
-	products = firstCatalogProducts(products, limit)
-
+	ids, total, err := c.searchProductIDs(ctx, query, offset, limit, priceFilter)
 	page := &catalog.Page{Offset: offset, Limit: limit, Total: total}
-	if total != nil && lastOffset+lastLimit < *total {
-		next := lastOffset + lastLimit
+	if total != nil && offset+limit < *total {
+		next := offset + limit
 		page.NextOffset = &next
 	}
+	if err != nil {
+		return catalog.SearchResult{Products: []catalog.Product{}, Source: "live", Page: page}, err
+	}
+	if len(ids) == 0 {
+		return catalog.SearchResult{Products: []catalog.Product{}, Source: "live", Page: page}, nil
+	}
+
+	details, prices, err := c.hydrateProducts(ctx, ids)
+	if err != nil {
+		return catalog.SearchResult{}, err
+	}
+	products := make([]catalog.Product, 0, limit)
+	for _, detail := range details {
+		product, ok := c.toProduct(detail, prices[detail.ProductID])
+		if ok && matchesPrice(product, req.MinPrice, req.MaxPrice) {
+			products = append(products, product)
+		}
+	}
+	products = firstCatalogProducts(dedupeProducts(products), limit)
 	return catalog.SearchResult{Products: products, Source: "live", Page: page}, nil
 }
 
@@ -330,20 +291,6 @@ func catalogPriceFilter(minPrice *float64, maxPrice *float64) string {
 		return ""
 	}
 	return fmt.Sprintf("%d-%d", minValue, maxValue)
-}
-
-func catalogSearchLimit(limit int, maxPrice *float64) int {
-	if maxPrice != nil && limit < 36 {
-		return 36
-	}
-	return limit
-}
-
-func catalogSearchPages(maxPrice *float64) int {
-	if maxPrice != nil {
-		return 4
-	}
-	return 1
 }
 
 func firstCatalogProducts(products []catalog.Product, limit int) []catalog.Product {
