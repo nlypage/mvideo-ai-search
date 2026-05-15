@@ -20,7 +20,14 @@ import {
 import { isOffTopic } from "@/lib/mv-security";
 import type { Product } from "@/lib/mv-tools";
 
-type Turn = { id: string; role: "user" | "assistant"; text: string; sources?: SourceCitation[] };
+type Turn = {
+  id: string;
+  role: "user" | "assistant";
+  text: string;
+  sources?: SourceCitation[];
+  products?: Product[];
+  requestText?: string;
+};
 
 type Source = SourceCitation;
 
@@ -129,7 +136,6 @@ export function SearchResults({
 }) {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [catalogProducts, setCatalogProducts] = useState<Product[]>([]);
-  const [recommendedProducts, setRecommendedProducts] = useState<Product[]>([]);
   const [debugSteps, setDebugSteps] = useState<AgentDebugStep[]>([]);
   const [loading, setLoading] = useState(false);
   const [catalogLoading, setCatalogLoading] = useState(false);
@@ -146,7 +152,6 @@ export function SearchResults({
     if (!query.trim()) {
       setTurns([]);
       setCatalogProducts([]);
-      setRecommendedProducts([]);
       setDebugSteps([]);
       setCatalogLoading(false);
       return;
@@ -163,14 +168,12 @@ export function SearchResults({
         },
       ]);
       setCatalogProducts([]);
-      setRecommendedProducts([]);
       setDebugSteps([]);
       setCatalogLoading(false);
       return;
     }
     setTurns([{ id: "u0", role: "user", text: trimmed }]);
     setCatalogProducts([]);
-    setRecommendedProducts([]);
     setDebugSteps([]);
     setLoading(true);
     setCatalogLoading(true);
@@ -192,11 +195,15 @@ export function SearchResults({
         if (cancelled) return;
         setTurns((t) => [
           ...t,
-          { id: "a0", role: "assistant", text: res.text, sources: res.sources },
+          {
+            id: "a0",
+            role: "assistant",
+            text: res.text,
+            sources: res.sources,
+            products: mergeProducts([], res.products),
+            requestText: trimmed,
+          },
         ]);
-        if (res.products?.length) {
-          setRecommendedProducts((current) => mergeProducts(current, res.products));
-        }
         if (res.debug?.length) setDebugSteps(res.debug);
       } catch (error: unknown) {
         if (cancelled) return;
@@ -247,11 +254,15 @@ export function SearchResults({
       const res = await chatLLM(history, { mode: "b2c" });
       setTurns((t) => [
         ...t,
-        { id: crypto.randomUUID(), role: "assistant", text: res.text, sources: res.sources },
+        {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          text: res.text,
+          sources: res.sources,
+          products: mergeProducts([], res.products),
+          requestText: text,
+        },
       ]);
-      if (res.products?.length) {
-        setRecommendedProducts((current) => mergeProducts(current, res.products));
-      }
       if (res.debug?.length) setDebugSteps((current) => [...current, ...res.debug!]);
     } catch (error: unknown) {
       setTurns((t) => [
@@ -338,12 +349,14 @@ export function SearchResults({
                   }
                   const { body, sources: inlineSources } = extractSources(t.text);
                   const sources = mergeSources(inlineSources, t.sources || []);
+                  const products = mergeProducts([], t.products || []);
                   return (
                     <div key={t.id}>
                       <div className="prose prose-sm max-w-none prose-p:my-1.5 text-foreground">
                         <ReactMarkdown>{body}</ReactMarkdown>
                       </div>
                       {sources.length > 0 && <SourceCitations sources={sources} />}
+                      {products.length > 0 && <TurnRecommendations products={products} />}
                     </div>
                   );
                 })}
@@ -353,19 +366,6 @@ export function SearchResults({
                       catalogLoading ? "Ищу товары в каталоге М.Видео…" : AGENT_STEPS[agentStep]
                     }
                   />
-                )}
-
-                {recommendedProducts.length > 0 && (
-                  <div>
-                    <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
-                      Товары, рекомендованные ИИ
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      {recommendedProducts.slice(0, 4).map((p) => (
-                        <AICard key={p.id} product={p} />
-                      ))}
-                    </div>
-                  </div>
                 )}
 
                 {debugSteps.length > 0 && <AgentDebugPanel steps={debugSteps} />}
@@ -424,6 +424,23 @@ export function SearchResults({
           Войдите, чтобы копить бонусы и получать персональные цены.
         </div>
       </aside>
+    </div>
+  );
+}
+
+function TurnRecommendations({ products }: { products: Product[] }) {
+  const visibleProducts = products.slice(0, 4);
+  return (
+    <div className="mt-3 rounded-xl border border-[var(--mv-red)]/20 bg-white/75 p-2.5">
+      <div className="mb-2 flex items-start gap-1.5 text-xs font-semibold text-muted-foreground">
+        <ShoppingCart className="mt-0.5 h-3.5 w-3.5 text-[var(--mv-red)]" />
+        <span>Товары, рекомендованные ИИ</span>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        {visibleProducts.map((product) => (
+          <AICard key={product.id} product={product} />
+        ))}
+      </div>
     </div>
   );
 }
