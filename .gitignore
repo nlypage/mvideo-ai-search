@@ -9,6 +9,7 @@ lerna-debug.log*
 
 node_modules
 .pi-lens/
+**/.pi-lens/
 dist
 dist-ssr
 .output

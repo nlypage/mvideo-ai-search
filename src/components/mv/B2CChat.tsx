@@ -3,8 +3,13 @@ import ReactMarkdown from "react-markdown";
 import { Send, ShoppingBag, X, Plus, Minus, Sparkles } from "lucide-react";
 import { ProductCard } from "./ProductCard";
 import { VoiceButton } from "./VoiceButton";
-import { chatLLM, type ChatMessage, type SourceCitation } from "@/lib/mv-llm";
-import { crossSellFor, type Product } from "@/lib/mv-tools";
+import {
+  chatLLM,
+  crossSellFor,
+  type ChatMessage,
+  type Product,
+  type SourceCitation,
+} from "@/lib/mv-llm";
 
 type UiMsg = {
   id: string;

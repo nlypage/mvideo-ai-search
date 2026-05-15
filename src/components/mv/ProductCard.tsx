@@ -1,5 +1,5 @@
 import { Star, ShoppingCart, ExternalLink, Package, Store } from "lucide-react";
-import type { Product } from "@/lib/mv-tools";
+import type { Product } from "@/lib/mv-llm";
 
 export function ProductCard({
   product,

@@ -15,11 +15,28 @@ export type AgentDebugStep = {
   result?: unknown;
 };
 
-export type SourceCitation = import("./mv-tools").BlogSource;
+export type Product = {
+  id: string;
+  title: string;
+  price: number;
+  oldPrice?: number;
+  rating: number;
+  reviews: number;
+  image: string;
+  url: string;
+  stock: { warehouse: number; store: number; storeName: string };
+  margin?: number;
+  category: string;
+};
+
+export type SourceCitation = {
+  title: string;
+  url: string;
+};
 
 export type LLMResult = {
   text: string;
-  products?: import("./mv-tools").Product[];
+  products?: Product[];
   sources?: SourceCitation[];
   raw?: ChatMessage[];
   debug?: AgentDebugStep[];
@@ -33,15 +50,26 @@ export type RuntimeAiConfig = {
   debug: boolean;
 };
 
+const OFF_TOPIC_RE =
+  /\b(?:код|python|javascript|sql|реферат|сочинение|погода|новости|политик|медицина|юрист|астролог|анекдот)\b/i;
+
+export function isOffTopic(text: string): boolean {
+  return (
+    OFF_TOPIC_RE.test(text) && !/ноутбук|компьютер|техника|телевизор|смартфон|м\.видео/i.test(text)
+  );
+}
+
+export function crossSellFor(_productId: string): { items: Product[]; rationale: string } {
+  return { items: [], rationale: "" };
+}
+
 export async function getRuntimeAiConfig(): Promise<RuntimeAiConfig> {
   const res = await fetch("/api/llm", { headers: { Accept: "application/json" } });
   if (!res.ok) throw new Error(`Config ${res.status}`);
   return res.json();
 }
 
-export async function searchCatalogProducts(
-  query: string,
-): Promise<import("./mv-tools").Product[]> {
+export async function searchCatalogProducts(query: string): Promise<Product[]> {
   const res = await fetch("/api/catalog", {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
@@ -49,7 +77,7 @@ export async function searchCatalogProducts(
   });
 
   if (!res.ok) return [];
-  const data = (await res.json()) as { products?: import("./mv-tools").Product[] };
+  const data = (await res.json()) as { products?: Product[] };
   return data.products || [];
 }
 
@@ -58,7 +86,7 @@ export async function chatLLM(
   opts: { mode: "b2c" | "b2e" },
 ): Promise<{
   text: string;
-  products?: import("./mv-tools").Product[];
+  products?: Product[];
   sources?: SourceCitation[];
   raw: ChatMessage[];
   debug?: AgentDebugStep[];

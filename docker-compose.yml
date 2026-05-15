@@ -1,7 +1,27 @@
 services:
+  cltkf-backend:
+    build:
+      context: .
+      target: backend
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      APP_MODE: client
+      HTTP_ADDR: :8080
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.openai.com/v1}
+      LLM_MODEL: ${LLM_MODEL:-gpt-5.4-mini}
+      AI_DEBUG: ${AI_DEBUG:-false}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    expose:
+      - "8080"
+    restart: unless-stopped
+
   cltkf:
     build:
       context: .
+      target: frontend
       args:
         VITE_APP_MODE: client
     env_file:
@@ -9,17 +29,37 @@ services:
         required: false
     environment:
       APP_MODE: client
+      BACKEND_ORIGIN: http://cltkf-backend:8080
+    depends_on:
+      - cltkf-backend
+    ports:
+      - "${CLIENT_PORT:-3000}:3000"
+    restart: unless-stopped
+
+  mvideo-consultant-backend:
+    build:
+      context: .
+      target: backend
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      APP_MODE: consultant
+      HTTP_ADDR: :8080
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_BASE_URL: ${LLM_BASE_URL:-https://api.openai.com/v1}
       LLM_MODEL: ${LLM_MODEL:-gpt-5.4-mini}
       AI_DEBUG: ${AI_DEBUG:-false}
-    ports:
-      - "${CLIENT_PORT:-3000}:3000"
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      CONSULTANT_ACCESS_TOKEN: ${CONSULTANT_ACCESS_TOKEN:-}
+    expose:
+      - "8080"
     restart: unless-stopped
 
   mvideo-consultant:
     build:
       context: .
+      target: frontend
       args:
         VITE_APP_MODE: consultant
     env_file:
@@ -27,11 +67,9 @@ services:
         required: false
     environment:
       APP_MODE: consultant
-      LLM_API_KEY: ${LLM_API_KEY:-}
-      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.openai.com/v1}
-      LLM_MODEL: ${LLM_MODEL:-gpt-5.4-mini}
-      AI_DEBUG: ${AI_DEBUG:-false}
-      CONSULTANT_ACCESS_TOKEN: ${CONSULTANT_ACCESS_TOKEN:-}
+      BACKEND_ORIGIN: http://mvideo-consultant-backend:8080
+    depends_on:
+      - mvideo-consultant-backend
     ports:
       - "${CONSULTANT_PORT:-3001}:3000"
     restart: unless-stopped

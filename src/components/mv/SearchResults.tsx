@@ -14,11 +14,11 @@ import {
   chatLLM,
   searchCatalogProducts,
   type AgentDebugStep,
+  isOffTopic,
   type ChatMessage,
+  type Product,
   type SourceCitation,
 } from "@/lib/mv-llm";
-import { isOffTopic } from "@/lib/mv-security";
-import type { Product } from "@/lib/mv-tools";
 
 type Turn = {
   id: string;

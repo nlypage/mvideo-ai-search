@@ -11,8 +11,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { ProductCard } from "./ProductCard";
-import { chatLLM, type ChatMessage } from "@/lib/mv-llm";
-import type { Product } from "@/lib/mv-tools";
+import { chatLLM, type ChatMessage, type Product } from "@/lib/mv-llm";
 
 type UiMsg = { id: string; role: "user" | "assistant"; text: string; products?: Product[] };
 type ConsoleTab = "catalog" | "warehouse" | "profile";
