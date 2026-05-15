@@ -2,6 +2,7 @@ package mvideo
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
@@ -12,30 +13,34 @@ import (
 	catalog "github.com/nlypage/mvideo-ai-search/backend/internal/domain/catalog"
 )
 
-func TestSearchHydratesProducts(t *testing.T) {
+func TestSearchUsesProductsBFF(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("x-set-application-id") == "" {
 			t.Fatalf("missing M.Video application header")
 		}
-		switch r.URL.Path {
-		case "/bff/products/v2/search":
-			if r.URL.Query().Get("query") != "oled tv" || r.URL.Query().Get("offset") != "2" || r.URL.Query().Get("limit") != "12" {
-				t.Fatalf("unexpected search query: %s", r.URL.RawQuery)
-			}
-			_, _ = w.Write([]byte(`{"body":{"total":20,"products":["100","100","200"]}}`))
-		case "/bff/product-details/list":
-			if r.Method != http.MethodPost {
-				t.Fatalf("details method = %s", r.Method)
-			}
-			_, _ = w.Write([]byte(`{"body":{"products":[{"productId":"100","name":"<b>OLED TV</b>","nameTranslit":"oled-tv","image":"/a.jpg","brandName":"Brand","category":{"name":"Телевизоры"},"rating":{"star":4.7,"count":12},"status":{}},{"productId":"200","name":"Cheap TV","image":"//cdn.test/b.jpg","category":{"name":"Телевизоры"},"rating":{"star":4.1,"count":2},"status":{"soldOut":true}}]}}`))
-		case "/bff/products/prices":
-			if got := r.URL.Query().Get("productIds"); got != "100,200" {
-				t.Fatalf("productIds = %q", got)
-			}
-			_, _ = w.Write([]byte(`{"body":{"materialPrices":[{"productId":"100","price":{"basePrice":120000,"salePrice":99990}},{"productId":"200","price":{"basePrice":1000,"salePrice":1000}}]}}`))
-		default:
+		if r.URL.Path != "/bff/products" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %s, want POST", r.Method)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		if body["query"] != "oled tv" || body["cursorId"] != "2" || body["limit"] != float64(12) {
+			t.Fatalf("unexpected request body: %+v", body)
+		}
+		filters, ok := body["filters"].([]any)
+		if !ok || len(filters) != 1 {
+			t.Fatalf("filters = %+v", body["filters"])
+		}
+		filter := filters[0].(map[string]any)
+		values := filter["valuesId"].([]any)
+		if filter["id"] != "price" || len(values) != 1 || values[0] != "10000-" {
+			t.Fatalf("unexpected filters: %+v", filters)
+		}
+		_, _ = w.Write([]byte(`{"body":{"total":20,"cursorId":"14","items":[{"productId":"100","name":"<b>OLED TV</b>","slug":"/products/oled-tv-100","images":["Pdb/a.jpg"],"price":{"basePrice":120000,"salePrice":99990},"rating":{"star":4.7,"count":12},"status":"available","soldOut":false},{"productId":"200","name":"Cheap TV","slug":"/products/cheap-tv-200","images":["//cdn.test/b.jpg"],"price":{"basePrice":1000,"salePrice":1000},"rating":{"star":4.1,"count":2},"status":"available","soldOut":false}]}}`))
 	}))
 	defer server.Close()
 
@@ -58,28 +63,32 @@ func TestSearchHydratesProducts(t *testing.T) {
 	if product.ID != "100" || product.Title != "OLED TV" || product.Price != 99990 || product.OldPrice == nil || *product.OldPrice != 120000 {
 		t.Fatalf("unexpected product: %+v", product)
 	}
-	if product.Rating != 4.7 || product.Reviews != 12 || product.Category != "Телевизоры · Brand" || product.Image != "https://img.example.test/a.jpg" {
-		t.Fatalf("unexpected hydrated fields: %+v", product)
+	if product.Rating != 4.7 || product.Reviews != 12 || product.Category != "Каталог" || product.Image != "https://img.example.test/Pdb/a.jpg" || product.URL != server.URL+"/products/oled-tv-100" {
+		t.Fatalf("unexpected product fields: %+v", product)
 	}
 }
 
-func TestSearchWithMaxPriceUsesNativePriceFilterOnly(t *testing.T) {
+func TestSearchWithMaxPriceUsesNativeProductsFilterOnly(t *testing.T) {
 	searchCalls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/bff/products/v2/search":
-			searchCalls++
-			if r.URL.Query().Get("limit") != "5" || r.URL.Query().Get("price") != "0-5000" {
-				t.Fatalf("native search query = %s, want limit=5 price=0-5000", r.URL.RawQuery)
-			}
-			_, _ = w.Write([]byte(`{"body":{"total":100,"products":["1","2","3","4","5"]}}`))
-		case "/bff/product-details/list":
-			_, _ = w.Write([]byte(`{"body":{"products":[{"productId":"1","name":"Premium Speaker 1","status":{}},{"productId":"2","name":"Premium Speaker 2","status":{}},{"productId":"3","name":"Premium Speaker 3","status":{}},{"productId":"4","name":"Premium Speaker 4","status":{}},{"productId":"5","name":"Budget Speaker","status":{}}]}}`))
-		case "/bff/products/prices":
-			_, _ = w.Write([]byte(`{"body":{"materialPrices":[{"productId":"1","price":{"salePrice":10000}},{"productId":"2","price":{"salePrice":11000}},{"productId":"3","price":{"salePrice":12000}},{"productId":"4","price":{"salePrice":13000}},{"productId":"5","price":{"salePrice":3000}}]}}`))
-		default:
+		if r.URL.Path != "/bff/products" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
+		searchCalls++
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		if body["limit"] != float64(5) || body["cursorId"] != "" {
+			t.Fatalf("unexpected request body: %+v", body)
+		}
+		filters := body["filters"].([]any)
+		filter := filters[0].(map[string]any)
+		values := filter["valuesId"].([]any)
+		if filter["id"] != "price" || len(values) != 1 || values[0] != "-5000" {
+			t.Fatalf("unexpected filters: %+v", filters)
+		}
+		_, _ = w.Write([]byte(`{"body":{"total":100,"cursorId":"5","items":[{"productId":"1","name":"Premium Speaker 1","slug":"/products/premium-speaker-1","price":{"salePrice":10000},"status":"available"},{"productId":"2","name":"Premium Speaker 2","slug":"/products/premium-speaker-2","price":{"salePrice":11000},"status":"available"},{"productId":"3","name":"Premium Speaker 3","slug":"/products/premium-speaker-3","price":{"salePrice":12000},"status":"available"},{"productId":"4","name":"Premium Speaker 4","slug":"/products/premium-speaker-4","price":{"salePrice":13000},"status":"available"},{"productId":"5","name":"Budget Speaker","slug":"/products/budget-speaker","price":{"salePrice":3000},"status":"available"}]}}`))
 	}))
 	defer server.Close()
 
@@ -101,66 +110,60 @@ func TestSearchWithMaxPriceUsesNativePriceFilterOnly(t *testing.T) {
 	}
 }
 
-func TestSearchHydratesDetailsAndPricesConcurrently(t *testing.T) {
-	detailsStarted := make(chan struct{})
-	pricesStarted := make(chan struct{})
+func TestSearchWarmsSessionAfterEmptyProductsResponse(t *testing.T) {
+	productsHits := 0
+	warmHits := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/bff/products/v2/search":
-			_, _ = w.Write([]byte(`{"body":{"total":1,"products":["100"]}}`))
-		case "/bff/product-details/list":
-			close(detailsStarted)
-			select {
-			case <-pricesStarted:
-			case <-time.After(500 * time.Millisecond):
-				http.Error(w, "prices did not start concurrently", http.StatusInternalServerError)
+		case "/bff/products":
+			productsHits++
+			if productsHits == 1 {
+				w.WriteHeader(http.StatusNoContent)
 				return
 			}
-			_, _ = w.Write([]byte(`{"body":{"products":[{"productId":"100","name":"TV","category":{"name":"Телевизоры"},"status":{}}]}}`))
-		case "/bff/products/prices":
-			close(pricesStarted)
-			select {
-			case <-detailsStarted:
-			case <-time.After(500 * time.Millisecond):
-				http.Error(w, "details did not start concurrently", http.StatusInternalServerError)
-				return
+			if _, err := r.Cookie("mvid_session"); err != nil {
+				t.Fatalf("retry missing warmup cookie: %v", err)
 			}
-			_, _ = w.Write([]byte(`{"body":{"materialPrices":[{"productId":"100","price":{"salePrice":100}}]}}`))
+			_, _ = w.Write([]byte(`{"body":{"total":1,"cursorId":"1","items":[{"productId":"100","name":"TV","slug":"/products/tv-100","price":{"salePrice":100},"status":"available"}]}}`))
+		case "/":
+			warmHits++
+			http.SetCookie(w, &http.Cookie{Name: "mvid_session", Value: "ok", Path: "/"})
+			_, _ = w.Write([]byte("ok"))
 		default:
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
 	}))
 	defer server.Close()
 
-	client := &Client{origin: server.URL, imageOrigin: "https://img.example.test", httpClient: server.Client()}
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatalf("cookie jar: %v", err)
+	}
+	httpClient := server.Client()
+	httpClient.Jar = jar
+	client := &Client{origin: server.URL, imageOrigin: "https://img.example.test", httpClient: httpClient}
 	result, err := client.Search(context.Background(), catalog.SearchRequest{Query: "tv"})
 	if err != nil {
 		t.Fatalf("Search() error = %v", err)
 	}
-	if len(result.Products) != 1 {
-		t.Fatalf("products len = %d", len(result.Products))
+	if productsHits != 2 || warmHits != 1 || len(result.Products) != 1 {
+		t.Fatalf("unexpected warmup result: productsHits=%d warmHits=%d result=%+v", productsHits, warmHits, result)
 	}
 }
 
 func TestSearchFollowsCookieSettingRedirect(t *testing.T) {
 	searchHits := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/bff/products/v2/search":
-			searchHits++
-			if _, err := r.Cookie("mvid_session"); err != nil {
-				http.SetCookie(w, &http.Cookie{Name: "mvid_session", Value: "ok", Path: "/"})
-				http.Redirect(w, r, r.URL.String(), http.StatusFound)
-				return
-			}
-			_, _ = w.Write([]byte(`{"body":{"total":1,"products":["100"]}}`))
-		case "/bff/product-details/list":
-			_, _ = w.Write([]byte(`{"body":{"products":[{"productId":"100","name":"TV","category":{"name":"Телевизоры"},"status":{}}]}}`))
-		case "/bff/products/prices":
-			_, _ = w.Write([]byte(`{"body":{"materialPrices":[{"productId":"100","price":{"salePrice":100}}]}}`))
-		default:
+		if r.URL.Path != "/bff/products" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
+		searchHits++
+		if _, err := r.Cookie("mvid_session"); err != nil {
+			http.SetCookie(w, &http.Cookie{Name: "mvid_session", Value: "ok", Path: "/"})
+			http.Redirect(w, r, r.URL.String(), http.StatusTemporaryRedirect)
+			return
+		}
+		_, _ = w.Write([]byte(`{"body":{"total":1,"cursorId":"1","items":[{"productId":"100","name":"TV","slug":"/products/tv-100","price":{"salePrice":100},"status":"available"}]}}`))
 	}))
 	defer server.Close()
 
@@ -192,9 +195,9 @@ func TestSearchEdgeCases(t *testing.T) {
 		}
 	})
 
-	t.Run("empty ids returns empty page", func(t *testing.T) {
+	t.Run("empty items returns empty page", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			_, _ = w.Write([]byte(`{"body":{"total":0,"products":[]}}`))
+			_, _ = w.Write([]byte(`{"body":{"total":0,"items":[]}}`))
 		}))
 		defer server.Close()
 		client := &Client{origin: server.URL, imageOrigin: "https://img.example.test", httpClient: server.Client()}

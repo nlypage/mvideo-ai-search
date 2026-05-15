@@ -25,8 +25,8 @@ func TestLiveGiftCatalogSequence(t *testing.T) {
 	for _, query := range queries {
 		result, err := registry.Run(ctx, "search_catalog", tools.Args{Query: query, MaxPrice: &maxPrice, Limit: &limit})
 		t.Logf("query=%q err=%v toolError=%q products=%d page=%+v", query, err, result.Error, len(result.Products), result.Page)
-		if err != nil {
-			t.Fatalf("search_catalog %q failed: err=%v", query, err)
+		if err != nil || result.Error != "" || len(result.Products) == 0 {
+			t.Fatalf("search_catalog %q failed: err=%v toolError=%q products=%d", query, err, result.Error, len(result.Products))
 		}
 		for _, product := range result.Products {
 			if product.Price > int(maxPrice) {

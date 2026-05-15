@@ -11,8 +11,8 @@ import (
 	"math"
 	"net/http"
 	"net/http/cookiejar"
-	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,6 +21,7 @@ import (
 )
 
 var errPoisonPill = errors.New("mvideo anti-bot response")
+var errEmptyResponse = errors.New("mvideo empty response")
 
 // Client talks to public M.Video catalog BFF endpoints.
 type Client struct {
@@ -51,27 +52,23 @@ func (c *Client) Search(ctx context.Context, req catalog.SearchRequest) (catalog
 	}
 	offset := clampInt(req.Offset, 0, 0, 1000)
 	limit := clampInt(req.Limit, 24, 1, 36)
-	priceFilter := catalogPriceFilter(req.MinPrice, req.MaxPrice)
-	ids, total, err := c.searchProductIDs(ctx, query, offset, limit, priceFilter)
-	page := &catalog.Page{Offset: offset, Limit: limit, Total: total}
-	if total != nil && offset+limit < *total {
+	payload, err := c.searchProducts(ctx, query, offset, limit, req.MinPrice, req.MaxPrice)
+	page := &catalog.Page{Offset: offset, Limit: limit, Total: optionalPositiveInt(payload.Body.Total)}
+	if payload.Body.CursorID != "" {
+		if next := intOrZeroString(payload.Body.CursorID); next > offset {
+			page.NextOffset = &next
+		}
+	} else if page.Total != nil && offset+limit < *page.Total {
 		next := offset + limit
 		page.NextOffset = &next
 	}
 	if err != nil {
 		return catalog.SearchResult{Products: []catalog.Product{}, Source: "live", Page: page}, err
 	}
-	if len(ids) == 0 {
-		return catalog.SearchResult{Products: []catalog.Product{}, Source: "live", Page: page}, nil
-	}
 
-	details, prices, err := c.hydrateProducts(ctx, ids)
-	if err != nil {
-		return catalog.SearchResult{}, err
-	}
-	products := make([]catalog.Product, 0, limit)
-	for _, detail := range details {
-		product, ok := c.toProduct(detail, prices[detail.ProductID])
+	products := make([]catalog.Product, 0, len(payload.Body.Items))
+	for _, item := range payload.Body.Items {
+		product, ok := c.toProductFromListItem(item)
 		if ok && matchesPrice(product, req.MinPrice, req.MaxPrice) {
 			products = append(products, product)
 		}
@@ -80,101 +77,54 @@ func (c *Client) Search(ctx context.Context, req catalog.SearchRequest) (catalog
 	return catalog.SearchResult{Products: products, Source: "live", Page: page}, nil
 }
 
-func (c *Client) hydrateProducts(ctx context.Context, ids []string) ([]detail, map[string]price, error) {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	type detailsResult struct {
-		items []detail
-		err   error
-	}
-	type pricesResult struct {
-		items map[string]price
-		err   error
-	}
-	detailsCh := make(chan detailsResult, 1)
-	pricesCh := make(chan pricesResult, 1)
-	go func() {
-		items, err := c.productDetails(ctx, ids)
-		detailsCh <- detailsResult{items: items, err: err}
-	}()
-	go func() {
-		items, err := c.productPrices(ctx, ids)
-		pricesCh <- pricesResult{items: items, err: err}
-	}()
-
-	detailsRes := <-detailsCh
-	if detailsRes.err != nil {
-		cancel()
-		<-pricesCh
-		return nil, nil, detailsRes.err
-	}
-	pricesRes := <-pricesCh
-	if pricesRes.err != nil {
-		return nil, nil, pricesRes.err
-	}
-	return detailsRes.items, pricesRes.items, nil
-}
-
-func (c *Client) searchProductIDs(ctx context.Context, query string, offset int, limit int, priceFilter string) ([]string, *int, error) {
-	endpoint, err := url.Parse(c.origin + "/bff/products/v2/search")
-	if err != nil {
-		return nil, nil, fmt.Errorf("parse search url: %w", err)
-	}
-	params := endpoint.Query()
-	params.Set("query", query)
-	params.Set("offset", fmt.Sprint(offset))
-	params.Set("limit", fmt.Sprint(limit))
-	if priceFilter != "" {
-		params.Set("price", priceFilter)
-	}
-	endpoint.RawQuery = params.Encode()
-
-	var payload searchResponse
-	if err := c.fetchJSON(ctx, http.MethodGet, endpoint.String(), nil, &payload); err != nil {
-		return nil, nil, err
-	}
-	ids := uniqueStrings(payload.Body.Products)
-	return ids, optionalPositiveInt(payload.Body.Total), nil
-}
-
-func (c *Client) productDetails(ctx context.Context, ids []string) ([]detail, error) {
+func (c *Client) searchProducts(ctx context.Context, query string, offset int, limit int, minPrice *float64, maxPrice *float64) (productsResponse, error) {
 	body := map[string]any{
-		"productIds":       ids,
-		"mediaTypes":       []string{"images"},
-		"category":         true,
-		"status":           true,
-		"brand":            true,
-		"propertyTypes":    []string{"KEY"},
-		"propertiesConfig": map[string]int{"propertiesPortionSize": 6},
-		"multioffer":       false,
+		"limit":                 limit,
+		"cursorId":              cursorID(offset),
+		"enrich":                true,
+		"sortBy":                "popularity",
+		"sortDirection":         "desc",
+		"isGettingBonusRoubles": true,
+		"query":                 query,
 	}
-	var payload detailsResponse
-	if err := c.fetchJSON(ctx, http.MethodPost, c.origin+"/bff/product-details/list", body, &payload); err != nil {
-		return nil, err
+	if valuesID := nativePriceValuesID(minPrice, maxPrice); len(valuesID) > 0 {
+		body["filters"] = []map[string]any{{"id": "price", "valuesId": valuesID}}
 	}
-	return payload.Body.Products, nil
+
+	var payload productsResponse
+	if err := c.fetchJSON(ctx, http.MethodPost, c.origin+"/bff/products", body, &payload); err != nil {
+		if !errors.Is(err, errEmptyResponse) {
+			return productsResponse{}, err
+		}
+		if warmErr := c.warmSession(ctx); warmErr != nil {
+			return productsResponse{}, warmErr
+		}
+		if err := c.fetchJSON(ctx, http.MethodPost, c.origin+"/bff/products", body, &payload); err != nil {
+			return productsResponse{}, err
+		}
+	}
+	return payload, nil
 }
 
-func (c *Client) productPrices(ctx context.Context, ids []string) (map[string]price, error) {
-	endpoint, err := url.Parse(c.origin + "/bff/products/prices")
+func (c *Client) warmSession(ctx context.Context) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.origin+"/", nil)
 	if err != nil {
-		return nil, fmt.Errorf("parse prices url: %w", err)
+		return fmt.Errorf("create warmup request: %w", err)
 	}
-	params := endpoint.Query()
-	params.Set("productIds", strings.Join(ids, ","))
-	params.Set("addBonusRubles", "true")
-	params.Set("isPromoApplied", "true")
-	endpoint.RawQuery = params.Encode()
-
-	var payload pricesResponse
-	if err := c.fetchJSON(ctx, http.MethodGet, endpoint.String(), nil, &payload); err != nil {
-		return nil, err
+	for key, value := range defaultHeaders(c.origin) {
+		req.Header.Set(key, value)
 	}
-	out := make(map[string]price, len(payload.Body.MaterialPrices))
-	for _, item := range payload.Body.MaterialPrices {
-		out[item.ProductID] = item
+	req.Header.Set("accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+	res, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("mvideo warmup request: %w", err)
 	}
-	return out, nil
+	defer func() { _ = res.Body.Close() }()
+	_, _ = io.Copy(io.Discard, io.LimitReader(res.Body, 4096))
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		return fmt.Errorf("mvideo warmup status %d", res.StatusCode)
+	}
+	return nil
 }
 
 func (c *Client) fetchJSON(ctx context.Context, method string, endpoint string, body any, destination any) error {
@@ -212,30 +162,26 @@ func (c *Client) fetchJSON(ctx context.Context, method string, endpoint string, 
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		return fmt.Errorf("mvideo status %d", res.StatusCode)
 	}
+	if len(text) == 0 {
+		return errEmptyResponse
+	}
 	if err := json.Unmarshal(text, destination); err != nil {
 		return fmt.Errorf("decode mvideo json: %w", err)
 	}
 	return nil
 }
 
-func (c *Client) toProduct(item detail, itemPrice price) (catalog.Product, bool) {
+func (c *Client) toProductFromListItem(item productListItem) (catalog.Product, bool) {
 	id := strings.TrimSpace(item.ProductID)
 	title := stripTags(item.Name)
 	if id == "" || title == "" {
 		return catalog.Product{}, false
 	}
-	salePrice := intOrZero(itemPrice.Price.SalePrice)
-	if salePrice == 0 {
-		salePrice = intOrZero(itemPrice.Price.BasePromoPrice)
-	}
-	basePrice := intOrZero(itemPrice.Price.BasePrice)
+	salePrice := intOrZero(item.Price.SalePrice)
+	basePrice := intOrZero(item.Price.BasePrice)
 	oldPrice := (*int)(nil)
 	if basePrice > 0 && salePrice > 0 && basePrice > salePrice {
 		oldPrice = &basePrice
-	}
-	category := strings.Join(nonEmpty(item.Category.Name, item.BrandName), " · ")
-	if category == "" {
-		category = "Каталог"
 	}
 	margin := 0
 	return catalog.Product{
@@ -245,12 +191,25 @@ func (c *Client) toProduct(item detail, itemPrice price) (catalog.Product, bool)
 		OldPrice: oldPrice,
 		Rating:   finiteFloat(item.Rating.Star),
 		Reviews:  intOrZero(item.Rating.Count),
-		Image:    c.imageURL(firstNonEmpty(item.Image, firstString(item.Images))),
-		URL:      c.origin + "/products/" + firstNonEmpty(item.NameTranslit, slugify(title)) + "-" + id,
-		Stock:    availability(item),
+		Image:    c.imageURL(firstString(item.Images)),
+		URL:      c.productListItemURL(item, title, id),
+		Stock:    listItemAvailability(item),
 		Margin:   &margin,
-		Category: category,
+		Category: "Каталог",
 	}, true
+}
+
+func (c *Client) productListItemURL(item productListItem, title string, id string) string {
+	if strings.HasPrefix(item.Slug, "http") {
+		return item.Slug
+	}
+	if strings.HasPrefix(item.Slug, "/") {
+		return c.origin + item.Slug
+	}
+	if strings.TrimSpace(item.Slug) != "" {
+		return c.origin + "/" + strings.TrimLeft(item.Slug, "/")
+	}
+	return c.origin + "/products/" + slugify(title) + "-" + id
 }
 
 func defaultHeaders(origin string) map[string]string {
@@ -259,6 +218,7 @@ func defaultHeaders(origin string) map[string]string {
 		"accept-language":      "ru-RU,ru;q=0.9,en;q=0.8",
 		"user-agent":           "Mozilla/5.0 (Linux; Android 10; Pixel 4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36",
 		"referer":              origin + "/",
+		"origin":               origin,
 		"x-set-application-id": "ea45c09a-880c-4b8e-a822-836dabb8988e",
 		"cookie": strings.Join([]string{
 			"MVID_CITY_ID=CityR_32",
@@ -275,22 +235,35 @@ func defaultHeaders(origin string) map[string]string {
 	}
 }
 
-func catalogPriceFilter(minPrice *float64, maxPrice *float64) string {
+func nativePriceValuesID(minPrice *float64, maxPrice *float64) []string {
 	if minPrice == nil && maxPrice == nil {
-		return ""
+		return nil
 	}
 	minValue := 0
 	if minPrice != nil {
 		minValue = intOrZero(*minPrice)
 	}
 	if maxPrice == nil {
-		return fmt.Sprintf("%d-", minValue)
+		if minValue <= 0 {
+			return nil
+		}
+		return []string{fmt.Sprintf("%d-", minValue)}
 	}
 	maxValue := intOrZero(*maxPrice)
 	if maxValue <= 0 {
+		return nil
+	}
+	if minValue <= 0 {
+		return []string{fmt.Sprintf("-%d", maxValue)}
+	}
+	return []string{fmt.Sprintf("%d-%d", minValue, maxValue)}
+}
+
+func cursorID(offset int) string {
+	if offset <= 0 {
 		return ""
 	}
-	return fmt.Sprintf("%d-%d", minValue, maxValue)
+	return fmt.Sprint(offset)
 }
 
 func firstCatalogProducts(products []catalog.Product, limit int) []catalog.Product {
@@ -322,12 +295,9 @@ func dedupeProducts(products []catalog.Product) []catalog.Product {
 	return out
 }
 
-func availability(item detail) catalog.Stock {
-	if item.Status.SoldOut {
+func listItemAvailability(item productListItem) catalog.Stock {
+	if item.SoldOut || strings.EqualFold(item.Status, "soldout") || strings.EqualFold(item.Status, "notavailable") {
 		return catalog.Stock{Warehouse: 0, Store: 0, StoreName: "Нет в наличии"}
-	}
-	if item.Status.AvailableOnlyInRetailStore {
-		return catalog.Stock{Warehouse: 0, Store: 1, StoreName: "Только в магазине"}
 	}
 	return catalog.Stock{Warehouse: 1, Store: 1, StoreName: "Наличие на mvideo.ru"}
 }
@@ -402,28 +372,19 @@ func optionalPositiveInt(value int) *int {
 	return &value
 }
 
-func uniqueStrings(values []string) []string {
-	seen := map[string]struct{}{}
-	out := make([]string, 0, len(values))
-	for _, value := range values {
-		trimmed := strings.TrimSpace(value)
-		if trimmed == "" {
-			continue
-		}
-		if _, ok := seen[trimmed]; ok {
-			continue
-		}
-		seen[trimmed] = struct{}{}
-		out = append(out, trimmed)
-	}
-	return out
-}
-
 func intOrZero(value float64) int {
 	if math.IsNaN(value) || math.IsInf(value, 0) || value <= 0 {
 		return 0
 	}
 	return int(math.Round(value))
+}
+
+func intOrZeroString(value string) int {
+	parsed, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || parsed <= 0 {
+		return 0
+	}
+	return parsed
 }
 
 func finiteFloat(value float64) float64 {
@@ -458,61 +419,27 @@ func firstString(values []string) string {
 	return values[0]
 }
 
-func nonEmpty(values ...string) []string {
-	out := make([]string, 0, len(values))
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			out = append(out, strings.TrimSpace(value))
-		}
-	}
-	return out
-}
-
-type searchResponse struct {
+type productsResponse struct {
 	Body struct {
-		Total    int      `json:"total"`
-		Products []string `json:"products"`
+		Items    []productListItem `json:"items"`
+		CursorID string            `json:"cursorId"`
+		Total    int               `json:"total"`
 	} `json:"body"`
 }
 
-type detailsResponse struct {
-	Body struct {
-		Products []detail `json:"products"`
-	} `json:"body"`
-}
-
-type pricesResponse struct {
-	Body struct {
-		MaterialPrices []price `json:"materialPrices"`
-	} `json:"body"`
-}
-
-type detail struct {
-	ProductID    string   `json:"productId"`
-	Name         string   `json:"name"`
-	NameTranslit string   `json:"nameTranslit"`
-	Image        string   `json:"image"`
-	Images       []string `json:"images"`
-	BrandName    string   `json:"brandName"`
-	Category     struct {
-		ID   string `json:"id"`
-		Name string `json:"name"`
-	} `json:"category"`
+type productListItem struct {
+	ProductID string   `json:"productId"`
+	Name      string   `json:"name"`
+	Images    []string `json:"images"`
+	Slug      string   `json:"slug"`
+	Price     struct {
+		BasePrice float64 `json:"basePrice"`
+		SalePrice float64 `json:"salePrice"`
+	} `json:"price"`
 	Rating struct {
 		Star  float64 `json:"star"`
 		Count float64 `json:"count"`
 	} `json:"rating"`
-	Status struct {
-		SoldOut                    bool `json:"soldOut"`
-		AvailableOnlyInRetailStore bool `json:"availableOnlyInRetailStore"`
-	} `json:"status"`
-}
-
-type price struct {
-	ProductID string `json:"productId"`
-	Price     struct {
-		BasePrice      float64 `json:"basePrice"`
-		SalePrice      float64 `json:"salePrice"`
-		BasePromoPrice float64 `json:"basePromoPrice"`
-	} `json:"price"`
+	Status  string `json:"status"`
+	SoldOut bool   `json:"soldOut"`
 }

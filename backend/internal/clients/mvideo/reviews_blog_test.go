@@ -38,12 +38,8 @@ func TestSearchReviewsByQueryFetchesTopProductsConcurrently(t *testing.T) {
 	var maxActive int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/bff/products/v2/search":
-			_, _ = w.Write([]byte(`{"body":{"total":3,"products":["100","200","300"]}}`))
-		case "/bff/product-details/list":
-			_, _ = w.Write([]byte(`{"body":{"products":[{"productId":"100","name":"TV 1","category":{"name":"Телевизоры"},"status":{}},{"productId":"200","name":"TV 2","category":{"name":"Телевизоры"},"status":{}},{"productId":"300","name":"TV 3","category":{"name":"Телевизоры"},"status":{}}]}}`))
-		case "/bff/products/prices":
-			_, _ = w.Write([]byte(`{"body":{"materialPrices":[{"productId":"100","price":{"salePrice":100}},{"productId":"200","price":{"salePrice":200}},{"productId":"300","price":{"salePrice":300}}]}}`))
+		case "/bff/products":
+			_, _ = w.Write([]byte(`{"body":{"total":3,"items":[{"productId":"100","name":"TV 1","slug":"/products/tv-1-100","price":{"salePrice":100},"status":"available"},{"productId":"200","name":"TV 2","slug":"/products/tv-2-200","price":{"salePrice":200},"status":"available"},{"productId":"300","name":"TV 3","slug":"/products/tv-3-300","price":{"salePrice":300},"status":"available"}]}}`))
 		case "/bff/reviews/aplaut":
 			current := atomic.AddInt32(&active, 1)
 			for {
