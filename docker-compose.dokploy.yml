@@ -1,5 +1,5 @@
 services:
-  cltkf-backend:
+  client-backend:
     image: ghcr.io/nlypage/mvideo-ai-search:${BACKEND_IMAGE_TAG:-backend-latest}
     pull_policy: always
     env_file:
@@ -17,7 +17,7 @@ services:
       - "8080"
     restart: unless-stopped
 
-  cltkf:
+  cleint-frontend:
     image: ghcr.io/nlypage/mvideo-ai-search:${CLIENT_IMAGE_TAG:-client-latest}
     pull_policy: always
     env_file:
@@ -25,14 +25,14 @@ services:
         required: false
     environment:
       APP_MODE: client
-      BACKEND_ORIGIN: http://cltkf-backend:8080
+      BACKEND_ORIGIN: http://client-backend:8080
     depends_on:
-      - cltkf-backend
+      - client-backend
     ports:
       - "${CLIENT_PORT:-3000}:3000"
     restart: unless-stopped
 
-  mvideo-consultant-backend:
+  consultant-backend:
     image: ghcr.io/nlypage/mvideo-ai-search:${BACKEND_IMAGE_TAG:-backend-latest}
     pull_policy: always
     env_file:
@@ -51,7 +51,7 @@ services:
       - "8080"
     restart: unless-stopped
 
-  mvideo-consultant:
+  consultant-frontend:
     image: ghcr.io/nlypage/mvideo-ai-search:${CONSULTANT_IMAGE_TAG:-consultant-latest}
     pull_policy: always
     env_file:
@@ -59,9 +59,9 @@ services:
         required: false
     environment:
       APP_MODE: consultant
-      BACKEND_ORIGIN: http://mvideo-consultant-backend:8080
+      BACKEND_ORIGIN: http://consultant-backend:8080
     depends_on:
-      - mvideo-consultant-backend
+      - consultant-backend
     ports:
       - "${CONSULTANT_PORT:-3001}:3000"
     restart: unless-stopped
