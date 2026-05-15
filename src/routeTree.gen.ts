@@ -11,8 +11,6 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as FaviconDoticoRouteImport } from './routes/favicon[.]ico'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as ApiLlmRouteImport } from './routes/api/llm'
-import { Route as ApiCatalogRouteImport } from './routes/api/catalog'
 
 const FaviconDoticoRoute = FaviconDoticoRouteImport.update({
   id: '/favicon.ico',
@@ -24,49 +22,31 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiLlmRoute = ApiLlmRouteImport.update({
-  id: '/api/llm',
-  path: '/api/llm',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiCatalogRoute = ApiCatalogRouteImport.update({
-  id: '/api/catalog',
-  path: '/api/catalog',
-  getParentRoute: () => rootRouteImport,
-} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/favicon.ico': typeof FaviconDoticoRoute
-  '/api/catalog': typeof ApiCatalogRoute
-  '/api/llm': typeof ApiLlmRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/favicon.ico': typeof FaviconDoticoRoute
-  '/api/catalog': typeof ApiCatalogRoute
-  '/api/llm': typeof ApiLlmRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/favicon.ico': typeof FaviconDoticoRoute
-  '/api/catalog': typeof ApiCatalogRoute
-  '/api/llm': typeof ApiLlmRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/favicon.ico' | '/api/catalog' | '/api/llm'
+  fullPaths: '/' | '/favicon.ico'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/favicon.ico' | '/api/catalog' | '/api/llm'
-  id: '__root__' | '/' | '/favicon.ico' | '/api/catalog' | '/api/llm'
+  to: '/' | '/favicon.ico'
+  id: '__root__' | '/' | '/favicon.ico'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   FaviconDoticoRoute: typeof FaviconDoticoRoute
-  ApiCatalogRoute: typeof ApiCatalogRoute
-  ApiLlmRoute: typeof ApiLlmRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -85,28 +65,12 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/llm': {
-      id: '/api/llm'
-      path: '/api/llm'
-      fullPath: '/api/llm'
-      preLoaderRoute: typeof ApiLlmRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/catalog': {
-      id: '/api/catalog'
-      path: '/api/catalog'
-      fullPath: '/api/catalog'
-      preLoaderRoute: typeof ApiCatalogRouteImport
-      parentRoute: typeof rootRouteImport
-    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   FaviconDoticoRoute: FaviconDoticoRoute,
-  ApiCatalogRoute: ApiCatalogRoute,
-  ApiLlmRoute: ApiLlmRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

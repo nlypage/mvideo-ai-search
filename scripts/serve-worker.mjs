@@ -6,6 +6,7 @@ import worker from "../dist/server/index.js";
 
 const host = process.env.HOST || "0.0.0.0";
 const port = Number(process.env.PORT || 3000);
+const backendOrigin = (process.env.BACKEND_ORIGIN || "").replace(/\/$/, "");
 const appDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const clientDir = resolve(appDir, "dist/client");
 
@@ -70,9 +71,64 @@ async function sendNodeResponse(res, response) {
   res.end(body);
 }
 
+async function readRequestBody(req) {
+  const chunks = [];
+  for await (const chunk of req) chunks.push(chunk);
+  return chunks.length ? Buffer.concat(chunks) : undefined;
+}
+
+function apiProxyHeaders(req) {
+  const headers = new Headers();
+  for (const [key, value] of Object.entries(req.headers)) {
+    if (!value) continue;
+    const lower = key.toLowerCase();
+    if (
+      [
+        "connection",
+        "content-length",
+        "host",
+        "keep-alive",
+        "proxy-authenticate",
+        "proxy-authorization",
+        "te",
+        "trailer",
+        "transfer-encoding",
+        "upgrade",
+      ].includes(lower)
+    ) {
+      continue;
+    }
+    if (Array.isArray(value)) {
+      value.forEach((item) => headers.append(key, item));
+    } else {
+      headers.set(key, value);
+    }
+  }
+  headers.set("x-forwarded-host", req.headers.host || "");
+  headers.set("x-forwarded-proto", "http");
+  if (req.socket.remoteAddress) headers.set("x-forwarded-for", req.socket.remoteAddress);
+  return headers;
+}
+
+async function proxyAPIRequest(req, res, url) {
+  const target = new URL(`${url.pathname}${url.search}`, backendOrigin);
+  const body = await readRequestBody(req);
+  const response = await fetch(target, {
+    method: req.method,
+    headers: apiProxyHeaders(req),
+    body: body && req.method !== "GET" && req.method !== "HEAD" ? body : undefined,
+  });
+  await sendNodeResponse(res, response);
+}
+
 const server = createServer(async (req, res) => {
   try {
     const url = new URL(req.url || "/", `http://${req.headers.host || `${host}:${port}`}`);
+    if (backendOrigin && (url.pathname === "/api" || url.pathname.startsWith("/api/"))) {
+      await proxyAPIRequest(req, res, url);
+      return;
+    }
+
     const staticAssetPath = findStaticAsset(url.pathname);
     if (staticAssetPath) {
       sendFile(res, staticAssetPath, url.pathname);
@@ -86,9 +142,7 @@ const server = createServer(async (req, res) => {
       return;
     }
 
-    const chunks = [];
-    for await (const chunk of req) chunks.push(chunk);
-    const body = chunks.length ? Buffer.concat(chunks) : undefined;
+    const body = await readRequestBody(req);
     const request = new Request(url, {
       method: req.method,
       headers: req.headers,

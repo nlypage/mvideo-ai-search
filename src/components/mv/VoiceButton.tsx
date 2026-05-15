@@ -1,28 +1,52 @@
 import { Mic, MicOff } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+type SpeechRecognitionResultEvent = Event & {
+  results: { [index: number]: { [index: number]: { transcript: string } } };
+};
+
+type BrowserSpeechRecognition = {
+  lang: string;
+  interimResults: boolean;
+  continuous: boolean;
+  onresult: ((event: SpeechRecognitionResultEvent) => void) | null;
+  onend: (() => void) | null;
+  onerror: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+};
+
+type SpeechRecognitionConstructor = new () => BrowserSpeechRecognition;
+
+type SpeechWindow = Window & {
+  SpeechRecognition?: SpeechRecognitionConstructor;
+  webkitSpeechRecognition?: SpeechRecognitionConstructor;
+};
+
 export function VoiceButton({ onText }: { onText: (t: string) => void }) {
   const [listening, setListening] = useState(false);
   const [supported, setSupported] = useState(true);
-  const recRef = useRef<any>(null);
+  const recRef = useRef<BrowserSpeechRecognition | null>(null);
 
   useEffect(() => {
-    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR) {
+    const speechWindow = window as SpeechWindow;
+    const SpeechRecognition =
+      speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
       setSupported(false);
       return;
     }
-    const r = new SR();
-    r.lang = "ru-RU";
-    r.interimResults = false;
-    r.continuous = false;
-    r.onresult = (e: any) => {
-      const t = e.results[0][0].transcript;
-      onText(t);
+    const recognition = new SpeechRecognition();
+    recognition.lang = "ru-RU";
+    recognition.interimResults = false;
+    recognition.continuous = false;
+    recognition.onresult = (event) => {
+      const text = event.results[0]?.[0]?.transcript;
+      if (text) onText(text);
     };
-    r.onend = () => setListening(false);
-    r.onerror = () => setListening(false);
-    recRef.current = r;
+    recognition.onend = () => setListening(false);
+    recognition.onerror = () => setListening(false);
+    recRef.current = recognition;
   }, [onText]);
 
   const toggle = () => {
@@ -33,7 +57,9 @@ export function VoiceButton({ onText }: { onText: (t: string) => void }) {
       try {
         recRef.current.start();
         setListening(true);
-      } catch {}
+      } catch {
+        setListening(false);
+      }
     }
   };
 
@@ -44,7 +70,9 @@ export function VoiceButton({ onText }: { onText: (t: string) => void }) {
       disabled={!supported}
       title={supported ? "Голосовой ввод" : "Браузер не поддерживает распознавание речи"}
       className={`inline-flex h-10 w-10 items-center justify-center rounded-full transition-colors ${
-        listening ? "bg-[var(--mv-red)] text-white animate-pulse" : "text-[var(--mv-red)] hover:bg-red-50"
+        listening
+          ? "bg-[var(--mv-red)] text-white animate-pulse"
+          : "text-[var(--mv-red)] hover:bg-red-50"
       } disabled:opacity-40`}
     >
       {listening ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}

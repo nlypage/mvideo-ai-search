@@ -15,16 +15,24 @@ env:
 
 jobs:
   build-and-push:
-    name: Build ${{ matrix.app_mode }} image
+    name: Build ${{ matrix.name }} image
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
-          - app_mode: client
+          - name: client
+            target: frontend
+            app_mode: client
             latest_tag: client-latest
-          - app_mode: consultant
+          - name: consultant
+            target: frontend
+            app_mode: consultant
             latest_tag: consultant-latest
+          - name: backend
+            target: backend
+            app_mode: both
+            latest_tag: backend-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -44,11 +52,12 @@ jobs:
         with:
           context: .
           push: true
+          target: ${{ matrix.target }}
           build-args: |
             VITE_APP_MODE=${{ matrix.app_mode }}
             VITE_LOW_MEMORY_BUILD=0
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.latest_tag }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.app_mode }}-${{ github.sha }}
-          cache-from: type=gha,scope=${{ matrix.app_mode }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.app_mode }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.name }}-${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
