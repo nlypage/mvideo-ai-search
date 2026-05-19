@@ -194,6 +194,32 @@ export function SearchResults({
       latestProducts.length > 0 ||
       turns.length > 2);
   const answerRequestText = turns.find((turn) => turn.role === "user")?.text || query;
+  const canAskFollowUp = hasAnswer && !isCompactAnswer;
+  const followUpComposer = canAskFollowUp ? (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        void sendFollowUp();
+      }}
+      className="flex items-center gap-2 border-t border-[#eef0f3] bg-white px-4 py-3"
+    >
+      <input
+        value={followUp}
+        onChange={(event) => setFollowUp(event.target.value)}
+        disabled={loading}
+        placeholder="Спросите уточнение…"
+        className="h-10 flex-1 rounded-full bg-[#f2f3f5] px-4 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--mv-red)]/25 disabled:opacity-60 sm:h-9"
+      />
+      <button
+        type="submit"
+        disabled={!followUp.trim() || loading}
+        aria-label="Отправить уточнение"
+        className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-[var(--mv-red)] text-white hover:bg-[var(--mv-red-dark)] disabled:opacity-40 sm:h-9 sm:w-9"
+      >
+        <Send className="h-4 w-4" />
+      </button>
+    </form>
+  ) : null;
 
   useEffect(() => {
     let cancelled = false;
@@ -506,25 +532,7 @@ export function SearchResults({
                 )}
               </div>
 
-              {!isCompactAnswer && (
-                <div className="flex items-center gap-2 border-t border-[#eef0f3] bg-white px-4 py-3">
-                  <input
-                    value={followUp}
-                    onChange={(e) => setFollowUp(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && void sendFollowUp()}
-                    placeholder="Спросите уточнение…"
-                    className="h-10 flex-1 rounded-full bg-[#f2f3f5] px-4 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--mv-red)]/25 sm:h-9"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => void sendFollowUp()}
-                    disabled={!followUp.trim() || loading}
-                    className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-[var(--mv-red)] text-white hover:bg-[var(--mv-red-dark)] disabled:opacity-40 sm:h-9 sm:w-9"
-                  >
-                    <Send className="h-4 w-4" />
-                  </button>
-                </div>
-              )}
+              {followUpComposer}
             </>
           ) : (
             <div className="px-4 py-4">
@@ -555,6 +563,8 @@ export function SearchResults({
               )}
             </div>
           )}
+
+          {!fullyOpen && !hasExpandableContent && followUpComposer}
         </section>
       )}
 
