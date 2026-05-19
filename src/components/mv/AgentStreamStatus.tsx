@@ -18,9 +18,14 @@ function normalizeStatus(label: string): string {
 
 function b2eToolLabel(event: AgentStreamEvent): string | null {
   if (event.type === "tool_call_done") return "формулирую подсказку";
-  if (event.name === "search_catalog") return "смотрю остатки";
-  if (event.name === "search_blog") return "ищу аргументы";
-  if (event.name === "recommend_products") return "проверяю аксессуары";
+  const hint = normalizeStatus(event.hint || "");
+  if (event.name === "search_catalog") return hint.replace(/^Ищет в каталоге/i, "смотрю остатки");
+  if (event.name === "search_blog") return hint.replace(/^Ищет аргументы/i, "ищу аргументы");
+  if (event.name === "search_reviews") return hint.replace(/^Читает отзывы/i, "читаю отзывы");
+  if (event.name === "recommend_products") {
+    return hint.replace(/^Проверяет допродажи/i, "проверяю допродажи");
+  }
+  if (hint) return hint;
   return null;
 }
 

@@ -5,7 +5,6 @@ import {
   Target,
   User,
   TrendingUp,
-  RefreshCw,
   BadgeInfo,
   CheckCircle2,
   XCircle,
@@ -29,26 +28,56 @@ type Plan = {
   status: "open" | "closed";
   items: { product: Product; status: PlanItemStatus }[];
 };
+type ShiftSummary = {
+  approvedItems: number;
+  totalItems: number;
+  bonus: number;
+};
 type ConsoleTab = "assistant" | "shift" | "profile";
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "неизвестная ошибка";
 }
 
-export function B2EConsole() {
-  const [messages, setMessages] = useState<UiMsg[]>([
+function compactAssistantText(text: string): string {
+  return text
+    .replace(/[ \t]*\n[ \t]*/g, "\n")
+    .replace(/\n{2,}/g, "\n")
+    .trim();
+}
+
+function consultantBonus(product: Product): number {
+  return Math.round((product.price * (product.margin || 0)) / 100);
+}
+
+function formatMoney(value: number): string {
+  return `${value.toLocaleString("ru")} ₽`;
+}
+
+function createInitialMessages(): UiMsg[] {
+  return [
     {
       id: "init",
       role: "assistant",
       text: "• Готов к подсказкам\n• Уточни товар или категорию\n• Покажу остатки и план допродажи",
     },
-  ]);
+  ];
+}
+
+export function B2EConsole() {
+  const [messages, setMessages] = useState<UiMsg[]>(createInitialMessages);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [progressEvents, setProgressEvents] = useState<AgentStreamEvent[]>([]);
+  const [currentStreamingId, setCurrentStreamingId] = useState<string | null>(null);
   const [debugSteps, setDebugSteps] = useState<AgentDebugStep[]>([]);
   const [showDebugPanel, setShowDebugPanel] = useState(false);
   const [plan, setPlan] = useState<Plan | null>(null);
+  const [shiftSummary, setShiftSummary] = useState<ShiftSummary>({
+    approvedItems: 0,
+    totalItems: 0,
+    bonus: 0,
+  });
   const [active, setActive] = useState<ConsoleTab>("assistant");
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -71,11 +100,22 @@ export function B2EConsole() {
     };
   }, []);
 
+  function resetConsultationContext() {
+    setMessages(createInitialMessages());
+    setInput("");
+    setPlan(null);
+    setProgressEvents([]);
+    setCurrentStreamingId(null);
+    setDebugSteps([]);
+    inputRef.current?.focus();
+  }
+
   async function send(text?: string) {
     const c = (text ?? input).trim();
     if (!c || loading) return;
     setInput("");
     const assistantId = crypto.randomUUID();
+    setCurrentStreamingId(assistantId);
     setMessages((m) => [...m, { id: crypto.randomUUID(), role: "user", text: c }]);
     setProgressEvents([]);
     setLoading(true);
@@ -117,7 +157,7 @@ export function B2EConsole() {
       if (res.products && res.products.length > 0) {
         setPlan({
           status: "open",
-          items: res.products.slice(0, 3).map((product) => ({ product, status: "pending" })),
+          items: res.products.slice(0, 4).map((product) => ({ product, status: "pending" })),
         });
       }
       if (res.debug?.length) setDebugSteps((current) => [...current, ...res.debug!]);
@@ -130,6 +170,7 @@ export function B2EConsole() {
       });
     } finally {
       setLoading(false);
+      setCurrentStreamingId(null);
     }
   }
 
@@ -137,17 +178,11 @@ export function B2EConsole() {
   const approvedItems = planItems.filter((item) => item.status === "approved");
   const declinedCount = planItems.filter((item) => item.status === "declined").length;
   const pendingCount = planItems.filter((item) => item.status === "pending").length;
-  const avgConsultantBonus = approvedItems.length
-    ? Math.round(
-        approvedItems.reduce((sum, item) => sum + (item.product.margin || 0), 0) /
-          approvedItems.length,
-      )
-    : 0;
-  const shiftProgress = Math.round((approvedItems.length / Math.max(1, planItems.length)) * 100);
-  const shiftBonus = approvedItems.reduce(
-    (sum, item) => sum + Math.round((item.product.price * (item.product.margin || 0)) / 100),
-    0,
-  );
+  const saleBonus = approvedItems.reduce((sum, item) => sum + consultantBonus(item.product), 0);
+  const shiftTotalItems = shiftSummary.totalItems + planItems.length;
+  const shiftApprovedItems = shiftSummary.approvedItems + approvedItems.length;
+  const shiftProgress = Math.round((shiftApprovedItems / Math.max(1, shiftTotalItems)) * 100);
+  const shiftBonus = shiftSummary.bonus + saleBonus;
   const setPlanItemStatus = (productId: string, status: PlanItemStatus) => {
     setPlan((current) => {
       if (!current || current.status === "closed") return current;
@@ -161,16 +196,25 @@ export function B2EConsole() {
       };
     });
   };
+  function finishConsultation() {
+    if (plan) {
+      setShiftSummary((current) => ({
+        approvedItems: current.approvedItems + approvedItems.length,
+        totalItems: current.totalItems + plan.items.length,
+        bonus: current.bonus + saleBonus,
+      }));
+    }
+    resetConsultationContext();
+  }
+
   const streamingTextStarted =
     loading &&
-    [...messages]
-      .reverse()
-      .find((message) => message.role === "assistant")
-      ?.text.trim() !== "";
+    currentStreamingId != null &&
+    messages.find((message) => message.id === currentStreamingId)?.text.trim() !== "";
   const tabs: Array<{ k: ConsoleTab; icon: typeof Sparkles; label: string; enabled: boolean }> = [
     { k: "assistant", icon: Sparkles, label: "Ассистент", enabled: true },
-    { k: "shift", icon: Target, label: "План дня", enabled: true },
-    { k: "profile", icon: User, label: "Профиль", enabled: true },
+    { k: "shift", icon: Target, label: "План дня", enabled: false },
+    { k: "profile", icon: User, label: "Профиль", enabled: false },
   ];
 
   return (
@@ -198,7 +242,9 @@ export function B2EConsole() {
               className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-left ${
                 active === it.k
                   ? "bg-red-50 font-semibold text-[var(--mv-red)]"
-                  : "text-muted-foreground hover:bg-muted"
+                  : it.enabled
+                    ? "text-muted-foreground hover:bg-muted"
+                    : "cursor-not-allowed text-muted-foreground/50"
               }`}
             >
               <it.icon className="h-4 w-4" />
@@ -217,7 +263,7 @@ export function B2EConsole() {
           </div>
           <div className="mt-1 flex items-center justify-between">
             <span>Бонус смены</span>
-            <span className="font-semibold">{shiftBonus.toLocaleString("ru")} ₽</span>
+            <span className="font-semibold">{formatMoney(shiftBonus)}</span>
           </div>
         </div>
       </aside>
@@ -252,7 +298,9 @@ export function B2EConsole() {
               className={`inline-flex items-center justify-center gap-1 rounded-md px-2 py-2 ${
                 active === it.k
                   ? "bg-red-50 font-semibold text-[var(--mv-red)]"
-                  : "bg-muted/60 text-muted-foreground"
+                  : it.enabled
+                    ? "bg-muted/60 text-muted-foreground"
+                    : "cursor-not-allowed bg-muted/40 text-muted-foreground/50"
               }`}
             >
               <it.icon className="h-4 w-4" />
@@ -275,24 +323,6 @@ export function B2EConsole() {
             >
               <BadgeInfo className="h-3.5 w-3.5" /> демо-режим
             </span>
-            <button
-              onClick={() => {
-                setMessages([
-                  {
-                    id: "init",
-                    role: "assistant",
-                    text: "• Готов к подсказкам\n• Уточни товар или категорию\n• Покажу остатки и план допродажи",
-                  },
-                ]);
-                setPlan(null);
-                setProgressEvents([]);
-                setDebugSteps([]);
-                inputRef.current?.focus();
-              }}
-              className="ml-auto inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1.5 text-xs font-semibold hover:bg-muted"
-            >
-              <RefreshCw className="h-3.5 w-3.5" /> Очистить чат
-            </button>
           </div>
           <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto px-3 py-4 sm:px-5">
             {messages
@@ -313,8 +343,8 @@ export function B2EConsole() {
                       }`}
                     >
                       {m.role === "assistant" ? (
-                        <div className="prose prose-sm max-w-none prose-p:my-1">
-                          <ReactMarkdown>{m.text}</ReactMarkdown>
+                        <div className="prose prose-sm max-w-none prose-p:my-0 prose-ul:my-1 prose-li:my-0">
+                          <ReactMarkdown>{compactAssistantText(m.text)}</ReactMarkdown>
                         </div>
                       ) : (
                         m.text
@@ -330,11 +360,11 @@ export function B2EConsole() {
                   </div>
                 </div>
               ))}
-            {loading && !streamingTextStarted && (
+            {loading && (
               <AgentStreamStatus
                 events={progressEvents}
                 hasText={streamingTextStarted}
-                fallback="Формулирую подсказку"
+                fallback="формулирую подсказку"
                 tone="b2e"
               />
             )}
@@ -391,11 +421,11 @@ export function B2EConsole() {
             </div>
             {!plan ? (
               <p className="mt-2 text-sm text-muted-foreground">
-                Задай запрос клиента - соберу подсказки и план допродажи с твоим доп. процентом.
+                Задай запрос клиента - соберу подсказки и посчитаю бонус за продажу.
               </p>
             ) : (
               <>
-                <ul className="mt-3 space-y-2 text-sm">
+                <ul className="mt-3 max-h-[26rem] space-y-2 overflow-y-auto pr-1 text-sm">
                   {plan.items.map(({ product, status }) => (
                     <li
                       key={product.id}
@@ -403,9 +433,10 @@ export function B2EConsole() {
                     >
                       <div className="font-medium leading-snug">{product.title}</div>
                       <div className="mt-1 text-xs text-muted-foreground">
-                        твой доп. процент <b className="text-emerald-700">+{product.margin}%</b> ·{" "}
-                        {product.price.toLocaleString("ru")} ₽ · на складе РЦ:{" "}
-                        {product.stock.warehouse} · в зале: {product.stock.store}
+                        бонус консультанта{" "}
+                        <b className="text-emerald-700">{formatMoney(consultantBonus(product))}</b>{" "}
+                        · {formatMoney(product.price)} · на складе РЦ: {product.stock.warehouse} · в
+                        зале: {product.stock.store}
                       </div>
                       <div
                         className="mt-2 flex gap-1.5"
@@ -444,8 +475,8 @@ export function B2EConsole() {
                 </ul>
                 <div className="mt-3 border-t border-emerald-200 pt-3 text-sm">
                   <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground">Средний доп. процент</span>
-                    <span className="font-bold text-emerald-700">+{avgConsultantBonus}%</span>
+                    <span className="text-muted-foreground">Бонус за продажу</span>
+                    <span className="font-bold text-emerald-700">{formatMoney(saleBonus)}</span>
                   </div>
                   <div className="mt-1 text-xs text-muted-foreground">
                     Взято: {approvedItems.length} · Отказ: {declinedCount} · Ожидает: {pendingCount}
@@ -453,10 +484,10 @@ export function B2EConsole() {
                 </div>
                 {plan.status === "open" ? (
                   <button
-                    onClick={() => setPlan({ ...plan, status: "closed" })}
+                    onClick={finishConsultation}
                     className="mt-3 inline-flex h-9 w-full items-center justify-center rounded-md bg-emerald-600 text-sm font-semibold text-white hover:bg-emerald-700"
                   >
-                    Закрыть консультацию
+                    Завершить и очистить чат
                   </button>
                 ) : (
                   <div className="mt-3 text-sm font-semibold text-emerald-700">

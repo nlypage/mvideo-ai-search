@@ -1,6 +1,10 @@
 import { Star, ShoppingCart, ExternalLink, Package, Store } from "lucide-react";
 import type { Product } from "@/lib/mv-llm";
 
+function consultantBonus(product: Product): number {
+  return Math.round((product.price * (product.margin || 0)) / 100);
+}
+
 export function ProductCard({
   product,
   onAdd,
@@ -61,7 +65,7 @@ export function ProductCard({
             </span>
             {showMargin && product.margin != null && (
               <span className="inline-flex items-center gap-1 rounded bg-amber-50 px-1.5 py-0.5 text-amber-700">
-                Твой бонус +{product.margin}%
+                Бонус {consultantBonus(product).toLocaleString("ru")} ₽
               </span>
             )}
           </div>
