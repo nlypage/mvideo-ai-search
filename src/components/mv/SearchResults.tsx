@@ -160,6 +160,7 @@ export function SearchResults({
   const [fullyOpen, setFullyOpen] = useState(false);
   const [showDebugPanel, setShowDebugPanel] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const wasFullyOpenRef = useRef(false);
 
   // Catalog results are independent from the assistant answer.
   const allHits: Product[] = query.trim() ? catalogProducts : [];
@@ -203,7 +204,10 @@ export function SearchResults({
   }, []);
 
   useEffect(() => {
-    if (!fullyOpen) return;
+    const wasFullyOpen = wasFullyOpenRef.current;
+    wasFullyOpenRef.current = fullyOpen;
+
+    if (!fullyOpen || !wasFullyOpen) return;
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [fullyOpen, loading, turns]);
 
