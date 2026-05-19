@@ -133,7 +133,7 @@ func (a *UpstreamAgent) chat(ctx context.Context, messages []chat.Message, mode 
 				toolChoice = forceToolChoice("cite_blog_source")
 				continue
 			}
-			products := finalProducts(messages, searchProducts, recommendedProducts)
+			products := finalProducts(mode, messages, searchProducts, recommendedProducts)
 			return finishResult(Result{Text: stripRenderedSourceLines(answerText), Products: products, Sources: dedupeSources(citedSources)}, a.debug, debug), nil
 		}
 
@@ -161,6 +161,9 @@ func (a *UpstreamAgent) chat(ctx context.Context, messages []chat.Message, mode 
 		for _, completed := range toolResults {
 			call := completed.Call
 			result := completed.Result
+			if mode == chat.ModeB2E {
+				result.Products = enrichB2EProducts(result.Products)
+			}
 			if len(result.Products) > 0 {
 				if call.Function.Name == "recommend_products" {
 					recommendedProducts = append(recommendedProducts, result.Products...)
@@ -308,7 +311,7 @@ func (a *UpstreamAgent) finalNoToolsAnswer(ctx context.Context, convo []openai.M
 		return fallback
 	}
 	text := security.RedactSensitive(sanitizeAssistantText(msg.Content, mode, messages))
-	return Result{Text: stripRenderedSourceLines(text), Products: finalProducts(messages, searchProducts, recommendedProducts), Sources: dedupeSources(citedSources)}
+	return Result{Text: stripRenderedSourceLines(text), Products: finalProducts(mode, messages, searchProducts, recommendedProducts), Sources: dedupeSources(citedSources)}
 }
 
 func sanitizeConversation(messages []chat.Message, mode chat.Mode) ([]chat.Message, *Result) {
@@ -339,12 +342,16 @@ func summarizeAssistantMessage(msg openai.Message) string {
 	return security.SanitizeUserText(firstNonEmpty(msg.Content, "Финальный ответ без дополнительных инструментов"), 500)
 }
 
-func finalProducts(messages []chat.Message, searchProducts []catalog.Product, recommendedProducts []catalog.Product) []catalog.Product {
+func finalProducts(mode chat.Mode, messages []chat.Message, searchProducts []catalog.Product, recommendedProducts []catalog.Product) []catalog.Product {
 	base := searchProducts
 	if len(recommendedProducts) > 0 {
 		base = recommendedProducts
 	}
-	return firstProducts(rankProductsForUserIntent(dedupeProducts(filterProductsForUserIntent(base, messages)), lastUserText(messages)), 4)
+	products := firstProducts(rankProductsForUserIntent(dedupeProducts(filterProductsForUserIntent(base, messages)), lastUserText(messages)), 4)
+	if mode == chat.ModeB2E {
+		return enrichB2EProducts(products)
+	}
+	return products
 }
 
 func (a *UpstreamAgent) maxTokens(mode chat.Mode) int {

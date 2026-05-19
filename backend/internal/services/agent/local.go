@@ -75,6 +75,9 @@ func (a *LocalAgent) Chat(ctx context.Context, messages []chat.Message, mode cha
 		}
 	}
 	products = rankProductsForUserIntent(dedupeProducts(filterProductsForUserIntent(products, messages)), last)
+	if mode == chat.ModeB2E {
+		products = enrichB2EProducts(products)
+	}
 
 	var article *catalog.BlogArticle
 	if shouldSearchBlog(last) || isBroadSelectionRequest(last) {
@@ -441,24 +444,25 @@ func buildB2CRecommendationText(last string, catalogQuery string, catalogQueries
 
 func buildB2ESalesText(products []catalog.Product, last string, article *catalog.BlogArticle) string {
 	if len(products) == 0 {
-		return "• Реальный каталог М.Видео сейчас недоступен\n• Уточните категорию, бюджет и сценарий клиента"
+		return "🟢 Лучший старт: уточни бюджет, категорию и сценарий клиента\n💬 Аргумент: без товара из каталога не буду выдумывать цену и остатки\n➡️ Следующий шаг: попроси клиента назвать 1-2 важные функции"
 	}
 	best := products[0]
 	lines := []string{
-		"• Лучший старт: " + shortProductTitle(best) + " за " + formatMoney(best.Price),
-		"• Аргумент: " + firstNonEmpty(strings.Join(productReason(best, last), ", "), "подходит под запрос клиента"),
+		"🟢 Лучший старт: " + shortProductTitle(best) + " за " + formatMoney(best.Price),
+		"💬 Аргумент: " + firstNonEmpty(strings.Join(productReason(best, last), ", "), "подходит под запрос клиента"),
 	}
 	if len(products) > 1 {
-		lines = append(lines, "• Альтернатива: "+shortProductTitle(products[1])+" за "+formatMoney(products[1].Price))
+		lines = append(lines, "🔁 Альтернатива: "+shortProductTitle(products[1])+" за "+formatMoney(products[1].Price))
 	}
-	lines = append(lines, "• Возражение: сравните пользу, рейтинг и наличие в магазине")
+	lines = append(lines, "🧩 Допродажа: покажи 1-2 аксессуара из карточек, служебный процент клиенту не называй")
+	lines = append(lines, "⚠️ Возражение: сравни пользу, рейтинг и наличие в магазине")
 	if article != nil {
 		argument := security.SanitizeUserText(firstNonEmpty(article.Content, article.Snippet), 90)
 		if argument != "" {
-			lines = append(lines, "• Подкрепление: "+argument+"…")
+			lines = append(lines, "💬 Подкрепление: "+argument+"...")
 		}
 	}
-	lines = append(lines, "• Следующий шаг: покажите карточки и предложите комплект")
+	lines = append(lines, "➡️ Следующий шаг: покажи карточки и предложи комплект")
 	return strings.Join(firstStrings(lines, 6), "\n")
 }
 
