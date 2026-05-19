@@ -17,6 +17,7 @@ import {
 import { SearchResults } from "@/components/mv/SearchResults";
 import { B2EConsole } from "@/components/mv/B2EConsole";
 import { MVideoLogo } from "@/components/mv/MVideoLogo";
+import { VoiceButton } from "@/components/mv/VoiceButton";
 import {
   Sheet,
   SheetContent,
@@ -110,9 +111,14 @@ function Index() {
                     onBlur={() => setSearchFocused(false)}
                     onKeyDown={(e) => e.key === "Enter" && submit()}
                     placeholder="Поиск в М.Видео"
-                    className={`h-10 w-full rounded-xl border border-[#e3e5ea] bg-white pl-11 pr-13 text-sm text-[#2c3138] shadow-[inset_0_0_0_1px_rgba(34,42,53,0.03)] transition-[border-color,box-shadow] placeholder:text-[#8a909b] focus:border-[#d8dce3] focus:outline-none md:h-11 ${
+                    className={`h-10 w-full rounded-xl border border-[#e3e5ea] bg-white pl-11 pr-[5.75rem] text-sm text-[#2c3138] shadow-[inset_0_0_0_1px_rgba(34,42,53,0.03)] transition-[border-color,box-shadow] placeholder:text-[#8a909b] focus:border-[#d8dce3] focus:outline-none md:h-11 ${
                       searchFocused ? "shadow-[0_0_0_2px_rgba(34,42,53,0.06)]" : ""
                     }`}
+                  />
+                  <VoiceButton
+                    disabled
+                    onText={() => {}}
+                    className="absolute right-10 top-1 h-8 w-8 rounded-lg text-[#818794] md:h-9 md:w-9"
                   />
                   <button
                     onClick={submit}

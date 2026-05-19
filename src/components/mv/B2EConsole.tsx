@@ -13,6 +13,7 @@ import {
 import { AgentDebugPanel } from "./AgentDebugPanel";
 import { AgentStreamStatus } from "./AgentStreamStatus";
 import { ProductCard } from "./ProductCard";
+import { VoiceButton } from "./VoiceButton";
 import {
   chatLLMStream,
   type AgentDebugStep,
@@ -390,13 +391,16 @@ export function B2EConsole() {
                 placeholder="Запрос клиента: «ищу телевизор для PS5»..."
                 className="max-h-28 min-h-10 w-full resize-none rounded-md border border-border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--mv-red)] sm:flex-1"
               />
-              <button
-                onClick={() => send()}
-                disabled={!input.trim() || loading}
-                className="inline-flex h-10 items-center justify-center gap-1 rounded-md bg-[var(--mv-red)] px-4 text-sm font-semibold text-white hover:bg-[var(--mv-red-dark)] disabled:opacity-40"
-              >
-                <Send className="h-4 w-4" /> Отправить
-              </button>
+              <div className="flex items-center gap-2 sm:shrink-0">
+                <VoiceButton disabled onText={() => {}} className="rounded-md" />
+                <button
+                  onClick={() => send()}
+                  disabled={!input.trim() || loading}
+                  className="inline-flex h-10 flex-1 items-center justify-center gap-1 rounded-md bg-[var(--mv-red)] px-4 text-sm font-semibold text-white hover:bg-[var(--mv-red-dark)] disabled:opacity-40 sm:flex-none"
+                >
+                  <Send className="h-4 w-4" /> Отправить
+                </button>
+              </div>
             </div>
             <div className="mt-1 text-xs text-muted-foreground">
               Опиши запрос клиента своими словами - я подскажу аргументы и допродажу

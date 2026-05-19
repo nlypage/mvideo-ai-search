@@ -10,10 +10,12 @@ import {
   Heart,
   SlidersHorizontal,
   ArrowDownUp,
+  Star,
 } from "lucide-react";
 import { AgentDebugPanel } from "./AgentDebugPanel";
 import { AgentStreamStatus } from "./AgentStreamStatus";
 import { EmViAvatar } from "./EmViAvatar";
+import { VoiceButton } from "./VoiceButton";
 import {
   chatLLMStream,
   searchCatalogProducts,
@@ -210,6 +212,7 @@ export function SearchResults({
         placeholder="Спросите уточнение…"
         className="h-10 flex-1 rounded-full bg-[#f2f3f5] px-4 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--mv-red)]/25 disabled:opacity-60 sm:h-9"
       />
+      <VoiceButton disabled onText={() => {}} className="h-10 w-10 sm:h-9 sm:w-9" />
       <button
         type="submit"
         disabled={!followUp.trim() || loading}
@@ -642,6 +645,22 @@ function ProductFilterBar() {
   );
 }
 
+function ProductRatingLine({ product, compact = false }: { product: Product; compact?: boolean }) {
+  return (
+    <div
+      className={`mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 ${
+        compact ? "text-[11px]" : "text-xs"
+      } text-[#6f7682]`}
+    >
+      <span className="inline-flex shrink-0 items-center gap-0.5">
+        <Star className="h-3 w-3 fill-amber-400 stroke-amber-400" />
+        {product.rating}
+      </span>
+      <span className="min-w-0 truncate">· {product.reviews} отзывов</span>
+    </div>
+  );
+}
+
 function ProductLoadingCards() {
   return (
     <>
@@ -707,6 +726,7 @@ function ResultCard({ product }: { product: Product }) {
       >
         {product.title}
       </a>
+      <ProductRatingLine product={product} />
 
       <div className="mt-4 flex items-center gap-2">
         <button
@@ -743,6 +763,7 @@ function AICard({ product }: { product: Product }) {
       />
       <div className="min-w-0 flex-1">
         <div className="text-xs font-medium leading-snug line-clamp-2">{product.title}</div>
+        <ProductRatingLine product={product} compact />
         <div className="mt-1 text-sm font-bold">{product.price.toLocaleString("ru")} ₽</div>
       </div>
     </a>

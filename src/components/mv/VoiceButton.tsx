@@ -1,5 +1,6 @@
 import { Mic, MicOff } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { cn } from "@/lib/utils";
 
 type SpeechRecognitionResultEvent = Event & {
   results: { [index: number]: { [index: number]: { transcript: string } } };
@@ -23,12 +24,29 @@ type SpeechWindow = Window & {
   webkitSpeechRecognition?: SpeechRecognitionConstructor;
 };
 
-export function VoiceButton({ onText }: { onText: (t: string) => void }) {
+export function VoiceButton({
+  onText,
+  disabled = false,
+  title,
+  className,
+}: {
+  onText: (t: string) => void;
+  disabled?: boolean;
+  title?: string;
+  className?: string;
+}) {
   const [listening, setListening] = useState(false);
   const [supported, setSupported] = useState(true);
   const recRef = useRef<BrowserSpeechRecognition | null>(null);
 
   useEffect(() => {
+    if (disabled) {
+      setListening(false);
+      setSupported(true);
+      recRef.current = null;
+      return;
+    }
+
     const speechWindow = window as SpeechWindow;
     const SpeechRecognition =
       speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition;
@@ -47,10 +65,10 @@ export function VoiceButton({ onText }: { onText: (t: string) => void }) {
     recognition.onend = () => setListening(false);
     recognition.onerror = () => setListening(false);
     recRef.current = recognition;
-  }, [onText]);
+  }, [disabled, onText]);
 
   const toggle = () => {
-    if (!recRef.current) return;
+    if (disabled || !recRef.current) return;
     if (listening) {
       recRef.current.stop();
     } else {
@@ -67,13 +85,23 @@ export function VoiceButton({ onText }: { onText: (t: string) => void }) {
     <button
       type="button"
       onClick={toggle}
-      disabled={!supported}
-      title={supported ? "Голосовой ввод" : "Браузер не поддерживает распознавание речи"}
-      className={`inline-flex h-10 w-10 items-center justify-center rounded-full transition-colors ${
+      disabled={disabled || !supported}
+      title={
+        title ||
+        (disabled
+          ? "Голосовой ввод скоро будет доступен"
+          : supported
+            ? "Голосовой ввод"
+            : "Браузер не поддерживает распознавание речи")
+      }
+      className={cn(
+        "inline-flex h-10 w-10 items-center justify-center rounded-full transition-colors",
         listening
-          ? "bg-[var(--mv-red)] text-white animate-pulse"
-          : "text-[var(--mv-red)] hover:bg-red-50"
-      } disabled:opacity-40`}
+          ? "animate-pulse bg-[var(--mv-red)] text-white"
+          : "text-[var(--mv-red)] hover:bg-red-50",
+        "disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent",
+        className,
+      )}
     >
       {listening ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
     </button>
