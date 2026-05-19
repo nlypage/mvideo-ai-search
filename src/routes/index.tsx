@@ -30,6 +30,9 @@ export const Route = createFileRoute("/")({
   component: Index,
 });
 
+const CATALOG_ICON_HREF =
+  "/e3eacfcf7eb23503951ca5c089d6c47c35ff8f27/sprites/sprite.symbol.svg#hamburger-search";
+
 function Index() {
   const appMode = ((import.meta.env.VITE_APP_MODE as string | undefined) || "both") as
     | "client"
@@ -45,32 +48,32 @@ function Index() {
     setSubmitted(searchInput.trim());
   }
   return (
-    <div className="min-h-screen bg-[#f5f5f5]">
-      {/* Top utility bar (dark) */}
-      <div className="bg-[#1a1a1a] text-white text-[12px]">
-        <div className="mx-auto max-w-[1440px] px-4 h-8 flex items-center gap-4">
-          <button className="inline-flex items-center gap-1 hover:text-[var(--mv-red)]">
+    <div className="min-h-screen bg-[var(--mv-page)]">
+      {/* Top utility bar */}
+      <div className="border-b border-[#e6e8ec] bg-[#f7f8fa] text-[12px] text-[#626975]">
+        <div className="mx-auto flex h-8 max-w-[1440px] items-center gap-4 px-4">
+          <button className="inline-flex items-center gap-1 transition-colors hover:text-[var(--mv-red)]">
             <MapPin className="h-3.5 w-3.5 text-[var(--mv-red)]" /> Москва
           </button>
-          <div className="hidden sm:flex items-center gap-4">
-            <button className="inline-flex items-center gap-1 hover:text-[var(--mv-red)]">
+          <div className="hidden items-center gap-4 sm:flex">
+            <button className="inline-flex items-center gap-1 transition-colors hover:text-[var(--mv-red)]">
               <Store className="h-3.5 w-3.5" /> Магазины
             </button>
-            <button className="inline-flex items-center gap-1 hover:text-[var(--mv-red)]">
+            <button className="inline-flex items-center gap-1 transition-colors hover:text-[var(--mv-red)]">
               <Wrench className="h-3.5 w-3.5" /> Установка и ремонт
             </button>
           </div>
-          <div className="ml-auto flex items-center gap-4 text-white/90">
-            <span className="hidden lg:inline hover:text-[var(--mv-red)] cursor-pointer">
+          <div className="ml-auto flex items-center gap-4 text-[#626975]">
+            <span className="hidden cursor-pointer transition-colors hover:text-[var(--mv-red)] lg:inline">
               Мобильное приложение
             </span>
-            <span className="hidden xl:inline hover:text-[var(--mv-red)] cursor-pointer">
+            <span className="hidden cursor-pointer transition-colors hover:text-[var(--mv-red)] xl:inline">
               М.Комбо
             </span>
-            <span className="hidden xl:inline hover:text-[var(--mv-red)] cursor-pointer">
+            <span className="hidden cursor-pointer transition-colors hover:text-[var(--mv-red)] xl:inline">
               М.Клик
             </span>
-            <span className="hidden 2xl:inline hover:text-[var(--mv-red)] cursor-pointer">
+            <span className="hidden cursor-pointer transition-colors hover:text-[var(--mv-red)] 2xl:inline">
               Стать продавцом
             </span>
             <Phone className="h-3.5 w-3.5" />
@@ -79,13 +82,13 @@ function Index() {
       </div>
 
       {/* Main white header */}
-      <header className="bg-white border-b border-border sticky top-0 z-40">
-        <div className="mx-auto max-w-[1440px] px-4 py-2 md:py-0 md:h-[72px] flex flex-col gap-2 md:flex-row md:items-center md:gap-4">
-          <div className="flex items-center gap-2 w-full md:w-auto md:flex-shrink-0">
-            <MVideoLogo className="h-9 md:h-10" />
+      <header className="sticky top-0 z-40 border-b border-[#e5e7eb] bg-white shadow-[0_2px_12px_rgba(34,42,53,0.06)]">
+        <div className="mx-auto flex max-w-[1440px] flex-col gap-2 px-4 py-2 md:h-[68px] md:flex-row md:items-center md:gap-4 md:py-0">
+          <div className="flex w-full items-center gap-3 md:w-auto md:flex-shrink-0">
+            <MVideoLogo className="h-9 md:h-12" />
 
-            <button className="hidden md:inline-flex items-center gap-2 h-11 px-5 rounded-lg bg-[var(--mv-red)] text-white text-[15px] font-semibold hover:bg-[var(--mv-red-dark)]">
-              <Menu className="h-4 w-4" /> Каталог
+            <button className="hidden h-11 items-center gap-2 rounded-xl bg-[var(--mv-red)] px-4 text-[15px] font-semibold text-white shadow-[0_5px_14px_rgba(227,6,19,0.24)] transition-colors hover:bg-[var(--mv-red-dark)] md:inline-flex">
+              <CatalogIcon className="h-5 w-5" /> Каталог
             </button>
 
             <div className="ml-auto flex items-center gap-1 md:hidden">
@@ -96,8 +99,8 @@ function Index() {
           </div>
 
           <div className="flex w-full items-center gap-2 md:min-w-0 md:flex-1">
-            <div className="relative flex-1 md:max-w-2xl">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <div className="relative w-full md:min-w-[260px]">
+              <Search className="pointer-events-none absolute left-4 top-1/2 h-4.5 w-4.5 -translate-y-1/2 text-[#818794]" />
               <input
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
@@ -105,37 +108,41 @@ function Index() {
                 onBlur={() => setSearchFocused(false)}
                 onKeyDown={(e) => e.key === "Enter" && submit()}
                 placeholder="Поиск в М.Видео"
-                className={`w-full h-10 md:h-11 pl-10 pr-12 rounded-lg border border-[#d4d4d4] text-sm transition-shadow focus:outline-none focus:border-transparent focus:ring-2 focus:ring-[#16c6d9]/35 ${
-                  searchFocused
-                    ? "shadow-[0_0_0_1px_var(--mv-red),0_0_0_4px_rgba(22,198,217,0.12)]"
-                    : ""
+                className={`h-10 w-full rounded-xl border border-[#e3e5ea] bg-white pl-11 pr-13 text-sm text-[#2c3138] shadow-[inset_0_0_0_1px_rgba(34,42,53,0.03)] transition-[border-color,box-shadow] placeholder:text-[#8a909b] focus:border-[#d8dce3] focus:outline-none md:h-11 ${
+                  searchFocused ? "shadow-[0_0_0_2px_rgba(34,42,53,0.06)]" : ""
                 }`}
               />
               <button
                 onClick={submit}
-                className="absolute right-1 top-1 h-8 w-8 md:h-9 md:w-9 rounded-md bg-[var(--mv-red)] text-white inline-flex items-center justify-center hover:bg-[var(--mv-red-dark)]"
+                className="absolute right-1 top-1 inline-flex h-8 w-8 items-center justify-center rounded-lg bg-[#2b3038] text-white transition-colors hover:bg-[#1f232a] md:h-9 md:w-9"
               >
                 <Search className="h-4 w-4" />
               </button>
-              {isClientMode && (
-                <div
-                  className={`pointer-events-none absolute left-0 top-full mt-1 hidden text-xs text-muted-foreground transition-opacity sm:block ${
-                    searchFocused ? "opacity-100" : "opacity-0"
-                  }`}
-                >
-                  Спросите как у консультанта - например, «OLED для PS5 до 250 000»
-                </div>
-              )}
             </div>
           </div>
 
-          <nav className="hidden lg:flex items-center gap-1 ml-auto">
-            <HeaderIcon icon={ClipboardList} label="Заказы" />
+          <nav className="hidden shrink-0 items-center gap-1 lg:flex">
+            <HeaderIcon icon={ClipboardList} label="Статус заказа" />
             <HeaderIcon icon={User} label="Войти" />
             <HeaderIcon icon={BarChart3} label="Сравнение" />
             <HeaderIcon icon={Heart} label="Избранное" />
             <HeaderIcon icon={ShoppingCart} label="Корзина" />
           </nav>
+        </div>
+        <div className="hidden border-t border-[#eef0f3] bg-white md:block">
+          <div className="mx-auto flex h-10 max-w-[1440px] items-center gap-5 overflow-x-auto px-4 text-[13px] font-medium text-[#3f4652]">
+            {["Акции", "Уценка", "M.Club", "Рассрочка", "Доставка", "Сервисы", "Бизнесу"].map(
+              (item) => (
+                <button
+                  key={item}
+                  type="button"
+                  className="whitespace-nowrap transition-colors hover:text-[var(--mv-red)]"
+                >
+                  {item}
+                </button>
+              ),
+            )}
+          </div>
         </div>
       </header>
       <main className="mx-auto max-w-[1440px]">
@@ -155,10 +162,18 @@ function Index() {
   );
 }
 
+function CatalogIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className={className}>
+      <use href={CATALOG_ICON_HREF} xlinkHref={CATALOG_ICON_HREF} />
+    </svg>
+  );
+}
+
 function HeaderIcon({ icon: Icon, label }: { icon: LucideIcon; label: string }) {
   return (
-    <button className="flex min-w-[58px] flex-col items-center justify-center px-2.5 py-1 text-[11px] text-foreground/80 transition-colors hover:text-[var(--mv-red)]">
-      <Icon className="mb-0.5 h-5 w-5" />
+    <button className="flex min-w-[82px] flex-col items-center justify-center px-2.5 py-1 text-[13px] font-medium leading-tight text-[#2c3138] transition-colors hover:text-[var(--mv-red)]">
+      <Icon className="mb-0.5 h-6 w-6 stroke-[2.1]" />
       <span>{label}</span>
     </button>
   );
@@ -188,14 +203,16 @@ function MobileHeaderMenu() {
           <SheetDescription>Разделы и быстрые действия</SheetDescription>
         </SheetHeader>
         <div className="mt-5 space-y-2">
-          {["Каталог", "Заказы", "Войти", "Сравнение", "Избранное", "Корзина"].map((item) => (
-            <button
-              key={item}
-              className="w-full rounded-md border border-border px-3 py-2 text-left text-sm transition-colors hover:border-[var(--mv-red)]/40 hover:text-[var(--mv-red)]"
-            >
-              {item}
-            </button>
-          ))}
+          {["Каталог", "Статус заказа", "Войти", "Сравнение", "Избранное", "Корзина"].map(
+            (item) => (
+              <button
+                key={item}
+                className="w-full rounded-md border border-border px-3 py-2 text-left text-sm transition-colors hover:border-[var(--mv-red)]/40 hover:text-[var(--mv-red)]"
+              >
+                {item}
+              </button>
+            ),
+          )}
         </div>
       </SheetContent>
     </Sheet>

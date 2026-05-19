@@ -94,15 +94,15 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       {
         rel: "icon",
         type: "image/svg+xml",
-        href: "/favicon.svg?v=mvideo-3",
+        href: "https://static.mvideo.ru/media/Assets/facelift/img/icon/svg/101024/mclub.svg",
       },
       {
         rel: "alternate icon",
-        href: "/favicon.ico?v=mvideo-3",
+        href: "https://static.mvideo.ru/media/Assets/facelift/img/icon/svg/101024/mclub.svg",
       },
       {
         rel: "shortcut icon",
-        href: "/favicon.ico?v=mvideo-3",
+        href: "https://static.mvideo.ru/media/Assets/facelift/img/icon/svg/101024/mclub.svg",
       },
     ],
   }),
