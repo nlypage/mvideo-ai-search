@@ -14,10 +14,12 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/nlypage/mvideo-ai-search/backend/internal/config"
 	catalog "github.com/nlypage/mvideo-ai-search/backend/internal/domain/catalog"
+	"github.com/nlypage/mvideo-ai-search/backend/internal/services/cache"
 )
 
 var errPoisonPill = errors.New("mvideo anti-bot response")
@@ -25,9 +27,13 @@ var errEmptyResponse = errors.New("mvideo empty response")
 
 // Client talks to public M.Video catalog BFF endpoints.
 type Client struct {
-	origin      string
-	imageOrigin string
-	httpClient  *http.Client
+	origin       string
+	imageOrigin  string
+	httpClient   *http.Client
+	cacheOnce    sync.Once
+	searchCache  cache.Store[catalog.SearchResult]
+	blogCache    cache.Store[[]catalog.BlogArticle]
+	reviewsCache cache.Store[[]catalog.ReviewSummary]
 }
 
 // New creates a M.Video client from runtime config.
@@ -44,6 +50,21 @@ func New(cfg config.Config) *Client {
 	}
 }
 
+func (c *Client) ensureCaches() {
+	c.cacheOnce.Do(func() {
+		const ttl = 5 * time.Minute
+		if c.searchCache == nil {
+			c.searchCache = cache.NewTTLStore[catalog.SearchResult](ttl)
+		}
+		if c.blogCache == nil {
+			c.blogCache = cache.NewTTLStore[[]catalog.BlogArticle](ttl)
+		}
+		if c.reviewsCache == nil {
+			c.reviewsCache = cache.NewTTLStore[[]catalog.ReviewSummary](ttl)
+		}
+	})
+}
+
 // Search searches products and hydrates details/prices.
 func (c *Client) Search(ctx context.Context, req catalog.SearchRequest) (catalog.SearchResult, error) {
 	query := strings.TrimSpace(req.Query)
@@ -52,6 +73,11 @@ func (c *Client) Search(ctx context.Context, req catalog.SearchRequest) (catalog
 	}
 	offset := clampInt(req.Offset, 0, 0, 1000)
 	limit := clampInt(req.Limit, 24, 1, 36)
+	c.ensureCaches()
+	cacheKey := searchCacheKey(query, req.MinPrice, req.MaxPrice, offset, limit)
+	if cached, ok := c.searchCache.Get(cacheKey); ok {
+		return cached, nil
+	}
 	payload, err := c.searchProducts(ctx, query, offset, limit, req.MinPrice, req.MaxPrice)
 	page := &catalog.Page{Offset: offset, Limit: limit, Total: optionalPositiveInt(payload.Body.Total)}
 	if payload.Body.CursorID != "" {
@@ -74,7 +100,9 @@ func (c *Client) Search(ctx context.Context, req catalog.SearchRequest) (catalog
 		}
 	}
 	products = firstCatalogProducts(dedupeProducts(products), limit)
-	return catalog.SearchResult{Products: products, Source: "live", Page: page}, nil
+	result := catalog.SearchResult{Products: products, Source: "live", Page: page}
+	c.searchCache.Set(cacheKey, result)
+	return result, nil
 }
 
 func (c *Client) searchProducts(ctx context.Context, query string, offset int, limit int, minPrice *float64, maxPrice *float64) (productsResponse, error) {
@@ -264,6 +292,17 @@ func cursorID(offset int) string {
 		return ""
 	}
 	return fmt.Sprint(offset)
+}
+
+func searchCacheKey(query string, minPrice *float64, maxPrice *float64, offset int, limit int) string {
+	return strings.Join([]string{strings.ToLower(strings.TrimSpace(query)), priceKey(minPrice), priceKey(maxPrice), strconv.Itoa(offset), strconv.Itoa(limit)}, "|")
+}
+
+func priceKey(value *float64) string {
+	if value == nil {
+		return ""
+	}
+	return strconv.FormatFloat(*value, 'f', 2, 64)
 }
 
 func firstCatalogProducts(products []catalog.Product, limit int) []catalog.Product {

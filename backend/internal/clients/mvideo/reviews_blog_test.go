@@ -93,6 +93,63 @@ func TestSearchBlogHydratesTopArticle(t *testing.T) {
 	}
 }
 
+func TestSearchBlogCachesIdenticalQueries(t *testing.T) {
+	var postsHits int32
+	var searchHits int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/blog/wp-json/wp/v2/posts" && r.URL.Query().Get("search") != "":
+			atomic.AddInt32(&postsHits, 1)
+			_, _ = fmt.Fprintf(w, `[{"link":"%s/blog/pomogaem-razobratsya/kak-vybrat-hdmi","title":{"rendered":"Как выбрать HDMI кабель"},"excerpt":{"rendered":"HDMI 2.1 для телевизора"}}]`, serverURL(r))
+		case r.URL.Path == "/blog/wp-json/wp/v2/search":
+			atomic.AddInt32(&searchHits, 1)
+			_, _ = w.Write([]byte(`[]`))
+		case r.URL.Path == "/blog/wp-json/wp/v2/posts" && r.URL.Query().Get("slug") == "kak-vybrat-hdmi":
+			_, _ = fmt.Fprintf(w, `[{"link":"%s/blog/pomogaem-razobratsya/kak-vybrat-hdmi","title":{"rendered":"Как выбрать HDMI кабель"},"excerpt":{"rendered":""},"content":{"rendered":"%s"}}]`, serverURL(r), strings.Repeat("текст ", 80))
+		default:
+			t.Fatalf("unexpected request: %s?%s", r.URL.Path, r.URL.RawQuery)
+		}
+	}))
+	defer server.Close()
+
+	client := &Client{origin: server.URL, imageOrigin: "https://img.example.test", httpClient: server.Client()}
+	for i := 0; i < 2; i++ {
+		articles, err := client.SearchBlog(context.Background(), "HDMI кабель")
+		if err != nil {
+			t.Fatalf("SearchBlog() error = %v", err)
+		}
+		if len(articles) != 1 {
+			t.Fatalf("unexpected articles: %+v", articles)
+		}
+	}
+	if postsHits != 1 || searchHits != 1 {
+		t.Fatalf("upstream hits: posts=%d search=%d, want 1/1", postsHits, searchHits)
+	}
+}
+
+func TestSearchReviewsCachesIdenticalProductRequests(t *testing.T) {
+	var hits int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		_, _ = w.Write([]byte(`{"body":{"totalNumber":1,"recommendPercent":90,"totalRating":4.5,"reviews":[{"text":"Отлично","benefits":"звук","drawbacks":""}]}}`))
+	}))
+	defer server.Close()
+
+	client := &Client{origin: server.URL, imageOrigin: "https://img.example.test", httpClient: server.Client()}
+	for i := 0; i < 2; i++ {
+		reviews, err := client.SearchReviews(context.Background(), "100", "")
+		if err != nil {
+			t.Fatalf("SearchReviews() error = %v", err)
+		}
+		if len(reviews) != 1 {
+			t.Fatalf("unexpected reviews: %+v", reviews)
+		}
+	}
+	if hits != 1 {
+		t.Fatalf("upstream hits = %d, want 1", hits)
+	}
+}
+
 func serverURL(r *http.Request) string {
 	scheme := "http"
 	if r.TLS != nil {

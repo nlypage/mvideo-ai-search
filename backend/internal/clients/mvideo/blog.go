@@ -20,6 +20,11 @@ func (c *Client) SearchBlog(ctx context.Context, query string) ([]catalog.BlogAr
 	if query == "" {
 		return []catalog.BlogArticle{}, nil
 	}
+	c.ensureCaches()
+	cacheKey := strings.ToLower(query)
+	if cached, ok := c.blogCache.Get(cacheKey); ok {
+		return cached, nil
+	}
 	articles, err := c.fetchBlogCandidates(ctx, query)
 	if err != nil {
 		return nil, err
@@ -32,6 +37,7 @@ func (c *Client) SearchBlog(ctx context.Context, query string) ([]catalog.BlogAr
 	if err == nil {
 		articles[0] = hydrated
 	}
+	c.blogCache.Set(cacheKey, articles)
 	return articles, nil
 }
 

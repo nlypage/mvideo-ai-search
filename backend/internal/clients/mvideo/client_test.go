@@ -249,3 +249,26 @@ func TestSearchReturnsPoisonPillError(t *testing.T) {
 		t.Fatalf("Search() error = %v, want anti-bot", err)
 	}
 }
+
+func TestSearchCachesIdenticalRequests(t *testing.T) {
+	hits := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		_, _ = w.Write([]byte(`{"body":{"total":1,"cursorId":"1","items":[{"productId":"100","name":"TV","slug":"/products/tv-100","price":{"salePrice":100},"status":"available"}]}}`))
+	}))
+	defer server.Close()
+
+	client := &Client{origin: server.URL, imageOrigin: "https://img.example.test", httpClient: server.Client()}
+	for i := 0; i < 2; i++ {
+		result, err := client.Search(context.Background(), catalog.SearchRequest{Query: "tv"})
+		if err != nil {
+			t.Fatalf("Search() error = %v", err)
+		}
+		if len(result.Products) != 1 {
+			t.Fatalf("unexpected products: %+v", result.Products)
+		}
+	}
+	if hits != 1 {
+		t.Fatalf("upstream hits = %d, want 1", hits)
+	}
+}

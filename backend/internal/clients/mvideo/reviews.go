@@ -12,10 +12,19 @@ import (
 
 // SearchReviews returns review summaries by product ID or by first catalog results for query.
 func (c *Client) SearchReviews(ctx context.Context, productID string, query string) ([]catalog.ReviewSummary, error) {
+	productID = strings.TrimSpace(productID)
+	query = strings.TrimSpace(query)
+	cacheKey := strings.ToLower(productID + "|" + query)
+	if cacheKey != "|" {
+		c.ensureCaches()
+		if cached, ok := c.reviewsCache.Get(cacheKey); ok {
+			return cached, nil
+		}
+	}
 	ids := []string{}
-	if strings.TrimSpace(productID) != "" {
-		ids = []string{strings.TrimSpace(productID)}
-	} else if strings.TrimSpace(query) != "" {
+	if productID != "" {
+		ids = []string{productID}
+	} else if query != "" {
 		result, err := c.Search(ctx, catalog.SearchRequest{Query: query})
 		if err != nil {
 			return nil, err
@@ -31,7 +40,15 @@ func (c *Client) SearchReviews(ctx context.Context, productID string, query stri
 		return []catalog.ReviewSummary{}, nil
 	}
 
-	return c.productReviewsBatch(ctx, ids)
+	reviews, err := c.productReviewsBatch(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	if cacheKey != "|" {
+		c.ensureCaches()
+		c.reviewsCache.Set(cacheKey, reviews)
+	}
+	return reviews, nil
 }
 
 func (c *Client) productReviewsBatch(ctx context.Context, ids []string) ([]catalog.ReviewSummary, error) {
