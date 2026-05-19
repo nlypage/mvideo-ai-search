@@ -19,7 +19,7 @@ export function ProductCard({
       <img
         src={product.image}
         alt={product.title}
-        className={`${compact ? "h-16 w-16" : "h-24 w-24"} flex-shrink-0 rounded-md object-cover bg-muted`}
+        className={`${compact ? "h-16 w-16" : "h-24 w-24"} flex-shrink-0 rounded-md bg-white object-cover`}
         loading="lazy"
       />
       <div className="flex-1 min-w-0 flex flex-col">

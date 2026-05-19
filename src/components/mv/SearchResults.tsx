@@ -4,10 +4,12 @@ import {
   Send,
   ChevronDown,
   ChevronUp,
-  Star,
   ShoppingCart,
   BookOpen,
   ExternalLink,
+  Heart,
+  SlidersHorizontal,
+  ArrowDownUp,
 } from "lucide-react";
 import { AgentDebugPanel } from "./AgentDebugPanel";
 import { AgentStreamStatus } from "./AgentStreamStatus";
@@ -409,180 +411,176 @@ export function SearchResults({
   }
 
   return (
-    <div className="mx-auto grid max-w-[1200px] grid-cols-1 gap-4 px-3 py-4 sm:gap-6 sm:px-4 sm:py-6 lg:grid-cols-[1fr_320px]">
-      <div className="min-w-0">
-        {loading && !fullyOpen && !hasAnyAssistantContent && (
+    <div className="mx-auto max-w-[1484px] px-4 py-5 sm:px-6 lg:px-8">
+      {loading && !fullyOpen && !hasAnyAssistantContent && (
+        <div className="mb-5 max-w-[920px]">
           <AgentStreamStatus
             events={progressEvents}
             hasText={streamingTextStarted}
             fallback={catalogLoading ? "смотрю каталог М.Видео" : "формулирую ответ"}
           />
-        )}
+        </div>
+      )}
 
-        {hasAnswer && (
-          <section className="mb-5 overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-red-50/60 via-white to-cyan-50/35 shadow-sm sm:mb-6">
-            <header className="flex items-center gap-2 border-b border-border/70 bg-white/75 px-3 py-3 sm:px-4">
-              <EmViAvatar className="h-8 w-8" />
-              <div className="min-w-0">
-                <div className="text-sm font-semibold">Ответ Эм.Ви</div>
-                <div className="truncate text-xs text-muted-foreground">
-                  по запросу: «{answerRequestText}»
-                </div>
+      {hasAnswer && (
+        <section className="mb-6 max-w-[920px] overflow-hidden rounded-2xl border border-[#e1e5eb] bg-white shadow-[0_8px_28px_rgba(34,42,53,0.08)]">
+          <header className="flex items-center gap-3 border-b border-[#eef0f3] bg-white px-4 py-3">
+            <EmViAvatar className="h-9 w-9" />
+            <div className="min-w-0">
+              <div className="text-[15px] font-bold text-[#1f232a]">Ответ Эм.Ви</div>
+              <div className="truncate text-xs text-[#818794]">
+                по запросу: «{answerRequestText}»
               </div>
-              {fullyOpen && hasExpandableContent && (
-                <button
-                  type="button"
-                  onClick={() => setFullyOpen(false)}
-                  className="ml-auto inline-flex items-center gap-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
-                >
-                  Свернуть <ChevronUp className="h-3.5 w-3.5" />
-                </button>
-              )}
-            </header>
+            </div>
+            {fullyOpen && hasExpandableContent && (
+              <button
+                type="button"
+                onClick={() => setFullyOpen(false)}
+                className="ml-auto inline-flex items-center gap-1 rounded-full bg-[#f2f3f5] px-3 py-1.5 text-xs font-semibold text-[#4b515b] transition-colors hover:text-[var(--mv-red)]"
+              >
+                Свернуть <ChevronUp className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </header>
 
-            {fullyOpen ? (
-              <>
-                <div
-                  ref={scrollRef}
-                  className="max-h-[62dvh] space-y-2.5 overflow-y-auto px-3 py-3 sm:max-h-[460px] sm:px-4"
-                >
-                  {turns.map((turn) => {
-                    if (turn.role === "user") {
-                      return (
-                        <div key={turn.id} className="flex justify-end">
-                          <div className="max-w-[86%] rounded-2xl rounded-br-sm bg-[var(--mv-red)] px-3 py-1.5 text-sm text-white sm:max-w-[80%]">
-                            {turn.text}
-                          </div>
-                        </div>
-                      );
-                    }
-
-                    const { body, sources: inlineSources } = extractSources(turn.text);
-                    const sources = mergeSources(inlineSources, turn.sources || []);
-                    const products = mergeProducts([], turn.products || []);
-                    const hasBody = body.trim() !== "";
-                    const isStreamingTurn = loading && latestAssistantTurn?.id === turn.id;
-
-                    if (!hasBody && sources.length === 0 && products.length === 0) {
-                      return isStreamingTurn ? (
-                        <AgentStreamStatus
-                          key={turn.id}
-                          events={progressEvents}
-                          hasText={streamingTextStarted}
-                          fallback="формулирую ответ"
-                        />
-                      ) : null;
-                    }
-
+          {fullyOpen ? (
+            <>
+              <div
+                ref={scrollRef}
+                className="max-h-[62dvh] space-y-3 overflow-y-auto bg-[#fafbfc] px-4 py-4 sm:max-h-[460px]"
+              >
+                {turns.map((turn) => {
+                  if (turn.role === "user") {
                     return (
-                      <div key={turn.id} className="flex items-start gap-2">
-                        <EmViAvatar className="mt-0.5 h-7 w-7" />
-                        <div className="min-w-0 max-w-[min(100%,760px)] flex-1">
-                          {hasBody && (
-                            <div className="rounded-xl rounded-tl-sm border border-border bg-white/85 px-3 py-2 text-[14px] leading-[1.45] shadow-sm">
-                              <div className="prose prose-sm max-w-none prose-p:my-1 prose-ul:my-1 prose-li:my-0.5 text-foreground">
-                                <ReactMarkdown>{body}</ReactMarkdown>
-                              </div>
-                            </div>
-                          )}
-                          {sources.length > 0 && <SourceCitations sources={sources} />}
-                          {products.length > 0 && <TurnRecommendations products={products} />}
+                      <div key={turn.id} className="flex justify-end">
+                        <div className="max-w-[86%] rounded-2xl rounded-br-sm bg-[var(--mv-red)] px-3 py-1.5 text-sm text-white sm:max-w-[80%]">
+                          {turn.text}
                         </div>
                       </div>
                     );
-                  })}
-                  {showDebugPanel && (
-                    <AgentDebugPanel
-                      steps={debugSteps}
-                      selectedProducts={selectedDebugProducts}
-                      className="mt-2"
-                      heading="Как Эм.Ви думала под капотом"
-                      checkedDataLabel="Какие данные проверила"
-                      emptyAssistantLabel="Эм.Ви"
-                    />
-                  )}
-                </div>
+                  }
 
-                {!isCompactAnswer && (
-                  <div className="flex items-center gap-2 border-t border-border/70 bg-white/80 px-3 py-2 sm:px-4">
-                    <input
-                      value={followUp}
-                      onChange={(e) => setFollowUp(e.target.value)}
-                      onKeyDown={(e) => e.key === "Enter" && void sendFollowUp()}
-                      placeholder="Спросите уточнение…"
-                      className="h-10 flex-1 rounded-full bg-muted px-3 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--mv-red)]/35 sm:h-9"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => void sendFollowUp()}
-                      disabled={!followUp.trim() || loading}
-                      className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-[var(--mv-red)] text-white hover:bg-[var(--mv-red-dark)] disabled:opacity-40 sm:h-9 sm:w-9"
-                    >
-                      <Send className="h-4 w-4" />
-                    </button>
-                  </div>
-                )}
-              </>
-            ) : (
-              <div className="px-3 py-3 sm:px-4 sm:py-4">
-                <div
-                  className={`relative ${hasExpandableContent ? "max-h-[170px] overflow-hidden" : ""}`}
-                >
-                  {latestAnswer.body.trim() && (
-                    <div className="prose prose-sm max-w-none text-[14px] leading-[1.55] text-foreground prose-p:my-1.5 prose-ul:my-1.5 prose-li:my-0.5">
-                      <ReactMarkdown>{latestAnswer.body}</ReactMarkdown>
+                  const { body, sources: inlineSources } = extractSources(turn.text);
+                  const sources = mergeSources(inlineSources, turn.sources || []);
+                  const products = mergeProducts([], turn.products || []);
+                  const hasBody = body.trim() !== "";
+                  const isStreamingTurn = loading && latestAssistantTurn?.id === turn.id;
+
+                  if (!hasBody && sources.length === 0 && products.length === 0) {
+                    return isStreamingTurn ? (
+                      <AgentStreamStatus
+                        key={turn.id}
+                        events={progressEvents}
+                        hasText={streamingTextStarted}
+                        fallback="формулирую ответ"
+                      />
+                    ) : null;
+                  }
+
+                  return (
+                    <div key={turn.id} className="flex items-start gap-2.5">
+                      <EmViAvatar className="mt-0.5 h-7 w-7" />
+                      <div className="min-w-0 max-w-[min(100%,760px)] flex-1">
+                        {hasBody && (
+                          <div className="rounded-xl rounded-tl-sm border border-[#e4e7ec] bg-white px-3 py-2 text-[14px] leading-[1.45] shadow-sm">
+                            <div className="prose prose-sm max-w-none prose-p:my-1 prose-ul:my-1 prose-li:my-0.5 text-[#1f232a]">
+                              <ReactMarkdown>{body}</ReactMarkdown>
+                            </div>
+                          </div>
+                        )}
+                        {sources.length > 0 && <SourceCitations sources={sources} />}
+                        {products.length > 0 && <TurnRecommendations products={products} />}
+                      </div>
                     </div>
-                  )}
-
-                  {latestSources.length > 0 && <SourceChips sources={latestSources.slice(0, 3)} />}
-
-                  {hasExpandableContent && (
-                    <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-white via-white/90 to-transparent" />
-                  )}
-                </div>
-
-                {hasExpandableContent && (
-                  <button
-                    type="button"
-                    onClick={() => setFullyOpen(true)}
-                    className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-full border border-border bg-white px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:border-[var(--mv-red)]/40 hover:text-[var(--mv-red)]"
-                  >
-                    Показать полностью <ChevronDown className="h-4 w-4" />
-                  </button>
+                  );
+                })}
+                {showDebugPanel && (
+                  <AgentDebugPanel
+                    steps={debugSteps}
+                    selectedProducts={selectedDebugProducts}
+                    className="mt-2"
+                    heading="Как Эм.Ви думала под капотом"
+                    checkedDataLabel="Какие данные проверила"
+                    emptyAssistantLabel="Эм.Ви"
+                  />
                 )}
               </div>
-            )}
-          </section>
-        )}
 
-        {/* Real search results */}
-        <div className="mb-3 flex flex-col gap-1.5 sm:flex-row sm:items-baseline sm:gap-3">
-          <h2 className="text-lg font-semibold">Товары в М.Видео</h2>
-          <span className="text-xs leading-relaxed text-muted-foreground">
-            {catalogLoading && allHits.length === 0
-              ? `Ищем реальные товары М.Видео для «${query}»…`
-              : `Найдено ${allHits.length} по реальным данным М.Видео для «${query}»`}
-          </span>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
-          {allHits.map((p) => (
-            <ResultCard key={p.id} product={p} />
-          ))}
-          {catalogLoading && allHits.length === 0 && <ProductLoadingCards />}
-          {!catalogLoading && allHits.length === 0 && (
-            <div className="col-span-full text-sm text-muted-foreground p-8 text-center border border-dashed rounded-xl">
-              Реальный каталог М.Видео не вернул товары по запросу.
+              {!isCompactAnswer && (
+                <div className="flex items-center gap-2 border-t border-[#eef0f3] bg-white px-4 py-3">
+                  <input
+                    value={followUp}
+                    onChange={(e) => setFollowUp(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && void sendFollowUp()}
+                    placeholder="Спросите уточнение…"
+                    className="h-10 flex-1 rounded-full bg-[#f2f3f5] px-4 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--mv-red)]/25 sm:h-9"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void sendFollowUp()}
+                    disabled={!followUp.trim() || loading}
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-[var(--mv-red)] text-white hover:bg-[var(--mv-red-dark)] disabled:opacity-40 sm:h-9 sm:w-9"
+                  >
+                    <Send className="h-4 w-4" />
+                  </button>
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="px-4 py-4">
+              <div
+                className={`relative ${hasExpandableContent ? "max-h-[150px] overflow-hidden" : ""}`}
+              >
+                {latestAnswer.body.trim() && (
+                  <div className="prose prose-sm max-w-none text-[14px] leading-[1.55] text-[#1f232a] prose-p:my-1.5 prose-ul:my-1.5 prose-li:my-0.5">
+                    <ReactMarkdown>{latestAnswer.body}</ReactMarkdown>
+                  </div>
+                )}
+
+                {latestSources.length > 0 && <SourceChips sources={latestSources.slice(0, 3)} />}
+
+                {hasExpandableContent && (
+                  <div className="pointer-events-none absolute inset-x-0 bottom-0 h-14 bg-gradient-to-t from-white via-white/90 to-transparent" />
+                )}
+              </div>
+
+              {hasExpandableContent && (
+                <button
+                  type="button"
+                  onClick={() => setFullyOpen(true)}
+                  className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-full border border-[#dfe3e8] bg-white px-4 py-2 text-sm font-semibold text-[#1f232a] transition-colors hover:border-[var(--mv-red)]/40 hover:text-[var(--mv-red)]"
+                >
+                  Показать полностью <ChevronDown className="h-4 w-4" />
+                </button>
+              )}
             </div>
           )}
+        </section>
+      )}
+
+      <div className="mb-4 flex flex-col gap-4">
+        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+          <h1 className="text-[28px] font-bold leading-tight text-[#1f232a]">{query}</h1>
+          <span className="text-[15px] text-[#8b929d]">
+            {catalogLoading && allHits.length === 0
+              ? "ищем товары"
+              : `${allHits.length.toLocaleString("ru")} найдено товаров`}
+          </span>
         </div>
+        <ProductFilterBar />
       </div>
 
-      <aside className="hidden lg:block space-y-4">
-        <div className="rounded-xl border border-border bg-white p-4 text-sm text-muted-foreground">
-          <div className="font-semibold text-foreground mb-1">Фильтры</div>
-          Фильтры появятся после подключения официального API каталога.
-        </div>
-      </aside>
+      <div className="grid grid-cols-2 gap-x-3 gap-y-8 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
+        {allHits.map((p) => (
+          <ResultCard key={p.id} product={p} />
+        ))}
+        {catalogLoading && allHits.length === 0 && <ProductLoadingCards />}
+        {!catalogLoading && allHits.length === 0 && (
+          <div className="col-span-full rounded-2xl border border-dashed border-[#d9dde5] bg-white p-10 text-center text-sm text-[#6a717d]">
+            Реальный каталог М.Видео не вернул товары по запросу.
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -604,19 +602,46 @@ function TurnRecommendations({ products }: { products: Product[] }) {
   );
 }
 
+function ProductFilterBar() {
+  const filters = [
+    { label: "Популярные", icon: ArrowDownUp },
+    { label: "Все фильтры", icon: SlidersHorizontal },
+    { label: "Цена", caret: true },
+    { label: "Категория", caret: true },
+    { label: "Бренд", caret: true },
+    { label: "Доставить курьером" },
+  ];
+
+  return (
+    <div className="flex gap-1.5 overflow-x-auto pb-1 text-[14px] text-[#252a32]">
+      {filters.map((filter) => {
+        const Icon = filter.icon;
+        return (
+          <button
+            key={filter.label}
+            type="button"
+            className="inline-flex h-9 shrink-0 items-center gap-2 rounded-xl bg-[#f2f3f5] px-3.5 font-medium transition-colors hover:bg-[#e8ebef]"
+          >
+            {Icon && <Icon className="h-4 w-4" />}
+            {filter.label}
+            {filter.caret && <ChevronDown className="h-4 w-4" />}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function ProductLoadingCards() {
   return (
     <>
-      {[0, 1, 2, 3, 4, 5].map((item) => (
-        <div
-          key={item}
-          className="rounded-xl border border-border bg-white p-3 animate-pulse"
-          aria-label="Ищем товар в М.Видео"
-        >
-          <div className="aspect-square rounded-lg bg-muted mb-3" />
-          <div className="h-4 rounded bg-muted mb-2" />
-          <div className="h-4 w-2/3 rounded bg-muted mb-4" />
-          <div className="h-5 w-24 rounded bg-muted" />
+      {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map((item) => (
+        <div key={item} className="animate-pulse" aria-label="Ищем товар в М.Видео">
+          <div className="aspect-[0.86] bg-[#f3f4f6]" />
+          <div className="mt-3 h-5 w-28 rounded bg-[#eef0f3]" />
+          <div className="mt-2 h-4 rounded bg-[#eef0f3]" />
+          <div className="mt-1 h-4 w-4/5 rounded bg-[#eef0f3]" />
+          <div className="mt-4 h-10 rounded-xl bg-[#eef0f3]" />
         </div>
       ))}
     </>
@@ -624,44 +649,71 @@ function ProductLoadingCards() {
 }
 
 function ResultCard({ product }: { product: Product }) {
+  const hasDiscount = Boolean(product.oldPrice && product.oldPrice > product.price);
+  const discount = hasDiscount
+    ? Math.round(((product.oldPrice! - product.price) / product.oldPrice!) * 100)
+    : 0;
+  const clubBonus = Math.max(1, Math.round(product.price * 0.06));
+
   return (
-    <a
-      href={product.url}
-      target="_blank"
-      rel="noreferrer"
-      className="group rounded-xl border border-border bg-white p-3 flex flex-col hover:shadow-md hover:border-[var(--mv-red)]/40 transition"
-    >
-      <div className="aspect-square rounded-lg bg-muted overflow-hidden mb-2">
+    <div className="group min-w-0 bg-white">
+      <a
+        href={product.url}
+        target="_blank"
+        rel="noreferrer"
+        className="block aspect-[0.86] overflow-hidden bg-white"
+      >
         <img
           src={product.image}
           alt={product.title}
-          className="h-full w-full object-cover group-hover:scale-105 transition"
+          className="h-full w-full bg-white object-contain transition duration-300 group-hover:scale-[1.03]"
           loading="lazy"
         />
+      </a>
+
+      <div className="mt-2 inline-flex h-5 items-center bg-[var(--mv-red)] px-2 text-[11px] font-bold text-white">
+        М +{clubBonus.toLocaleString("ru")}
       </div>
-      <div className="text-sm font-medium leading-snug line-clamp-2 group-hover:text-[var(--mv-red)] min-h-[2.5rem]">
-        {product.title}
-      </div>
-      <div className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
-        <Star className="h-3 w-3 fill-amber-400 stroke-amber-400" />
-        {product.rating} · {product.reviews}
-      </div>
-      <div className="mt-2 flex items-end justify-between">
-        <div>
-          <div className="text-lg font-bold leading-none">
-            {product.price.toLocaleString("ru")} ₽
-          </div>
-          {product.oldPrice && (
-            <div className="text-xs text-muted-foreground line-through">
-              {product.oldPrice.toLocaleString("ru")} ₽
-            </div>
-          )}
+
+      <div className="mt-2 flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
+        <div className="text-[18px] font-bold leading-none text-[#1f232a]">
+          {product.price.toLocaleString("ru")} ₽
         </div>
-        <span className="inline-flex items-center gap-1 rounded-md bg-[var(--mv-red)] px-2.5 py-1.5 text-xs font-semibold text-white">
-          <ShoppingCart className="h-3.5 w-3.5" />
-        </span>
+        {product.oldPrice && (
+          <div className="text-[12px] text-[#9aa1ac] line-through">
+            {product.oldPrice.toLocaleString("ru")} ₽
+          </div>
+        )}
+        {hasDiscount && (
+          <div className="text-[12px] font-semibold text-[var(--mv-red)]">-{discount}%</div>
+        )}
       </div>
-    </a>
+
+      <a
+        href={product.url}
+        target="_blank"
+        rel="noreferrer"
+        className="mt-1.5 block min-h-[42px] text-[13px] leading-[1.28] text-[#2f3540] transition-colors line-clamp-2 hover:text-[var(--mv-red)]"
+      >
+        {product.title}
+      </a>
+
+      <div className="mt-4 flex items-center gap-2">
+        <button
+          type="button"
+          className="h-10 flex-1 rounded-xl bg-[#ff0032] px-3 text-[15px] font-semibold text-white transition-colors hover:bg-[var(--mv-red-dark)]"
+        >
+          В корзину
+        </button>
+        <button
+          type="button"
+          aria-label="Добавить в избранное"
+          className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#f5f6f8] text-[#1f232a] transition-colors hover:text-[var(--mv-red)]"
+        >
+          <Heart className="h-5 w-5" />
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -676,7 +728,7 @@ function AICard({ product }: { product: Product }) {
       <img
         src={product.image}
         alt=""
-        className="h-14 w-14 rounded object-cover bg-muted flex-shrink-0"
+        className="h-14 w-14 rounded bg-white object-cover flex-shrink-0"
         loading="lazy"
       />
       <div className="min-w-0 flex-1">
