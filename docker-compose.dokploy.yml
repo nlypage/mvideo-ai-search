@@ -17,7 +17,7 @@ services:
       - "8080"
     restart: unless-stopped
 
-  cleint-frontend:
+  client-frontend:
     image: ghcr.io/nlypage/mvideo-ai-search:${CLIENT_IMAGE_TAG:-client-latest}
     pull_policy: always
     env_file:
