@@ -8,7 +8,7 @@ import (
 )
 
 // RefusalB2C is the customer-safe refusal used for off-topic requests.
-const RefusalB2C = "Я помогаю только с выбором техники в М.Видео. Сформулируйте, пожалуйста, что вы ищете 🙂"
+const RefusalB2C = "Помогаю только с выбором техники в М.Видео. Сформулируйте, пожалуйста, что вы ищете 🙂"
 
 var offTopicPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)(сортировк[а-яё]*\s+пузырьк|bubble\s*sort|quicksort|merge\s*sort|алгоритм)`),

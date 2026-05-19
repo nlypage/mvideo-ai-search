@@ -31,7 +31,7 @@ func (a *App) Handler() http.Handler {
 	toolRegistry := tools.New(catalogClient)
 	var chatAgent httpapi.ChatAgent = agent.NewLocal(toolRegistry, a.cfg.AIDebug)
 	if a.cfg.Configured() {
-		chatAgent = agent.NewUpstream(openai.New(a.cfg), toolRegistry, a.cfg.AIDebug)
+		chatAgent = agent.NewUpstream(openai.New(a.cfg), toolRegistry, a.cfg.AIDebug, agent.UpstreamOptionsFromConfig(a.cfg))
 	}
 	return httpapi.NewRouter(a.cfg, a.logger, httpapi.Dependencies{Catalog: catalogService, Agent: chatAgent})
 }

@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestLoadDefaults(t *testing.T) {
 	cfg := Load(nil)
@@ -17,6 +20,12 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.LLMModel != "gpt-5.4-mini" {
 		t.Fatalf("LLMModel = %q", cfg.LLMModel)
 	}
+	if cfg.LLMTimeout != 20*time.Second || cfg.LLMMaxTokensB2C != 700 || cfg.LLMMaxTokensB2E != 350 {
+		t.Fatalf("unexpected LLM defaults: timeout=%s b2c=%d b2e=%d", cfg.LLMTimeout, cfg.LLMMaxTokensB2C, cfg.LLMMaxTokensB2E)
+	}
+	if cfg.LLMTemperatureB2C != 0.35 || cfg.LLMTemperatureB2E != 0.2 {
+		t.Fatalf("unexpected LLM temperatures: b2c=%v b2e=%v", cfg.LLMTemperatureB2C, cfg.LLMTemperatureB2E)
+	}
 	if cfg.Configured() {
 		t.Fatal("Configured() = true, want false")
 	}
@@ -29,6 +38,11 @@ func TestLoadOverrides(t *testing.T) {
 		"LLM_API_KEY=sk-test",
 		"LLM_BASE_URL=https://example.com/v1/",
 		"LLM_MODEL=model-a",
+		"LLM_TIMEOUT=30s",
+		"LLM_MAX_TOKENS_B2C=900",
+		"LLM_MAX_TOKENS_B2E=450",
+		"LLM_TEMPERATURE_B2C=0.4",
+		"LLM_TEMPERATURE_B2E=0.1",
 		"AI_DEBUG=true",
 	})
 
@@ -43,6 +57,12 @@ func TestLoadOverrides(t *testing.T) {
 	}
 	if cfg.LLMModel != "model-a" {
 		t.Fatalf("LLMModel = %q", cfg.LLMModel)
+	}
+	if cfg.LLMTimeout != 30*time.Second || cfg.LLMMaxTokensB2C != 900 || cfg.LLMMaxTokensB2E != 450 {
+		t.Fatalf("unexpected LLM overrides: timeout=%s b2c=%d b2e=%d", cfg.LLMTimeout, cfg.LLMMaxTokensB2C, cfg.LLMMaxTokensB2E)
+	}
+	if cfg.LLMTemperatureB2C != 0.4 || cfg.LLMTemperatureB2E != 0.1 {
+		t.Fatalf("unexpected LLM temperature overrides: b2c=%v b2e=%v", cfg.LLMTemperatureB2C, cfg.LLMTemperatureB2E)
 	}
 	if !cfg.AIDebug {
 		t.Fatal("AIDebug = false, want true")

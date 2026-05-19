@@ -2,6 +2,7 @@ package config
 
 import (
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -25,6 +26,11 @@ type Config struct {
 	LLMAPIKey             string
 	LLMBaseURL            string
 	LLMModel              string
+	LLMTimeout            time.Duration
+	LLMMaxTokensB2C       int
+	LLMMaxTokensB2E       int
+	LLMTemperatureB2C     float64
+	LLMTemperatureB2E     float64
 	ConsultantAccessToken string
 	AIDebug               bool
 	LogLevel              string
@@ -43,6 +49,11 @@ func Load(environ []string) Config {
 		LLMAPIKey:             firstNonEmpty(env["LLM_API_KEY"], env["OPENAI_API_KEY"]),
 		LLMBaseURL:            validateBaseURL(firstNonEmpty(env["LLM_BASE_URL"], "https://api.openai.com/v1")),
 		LLMModel:              firstNonEmpty(env["LLM_MODEL"], "gpt-5.4-mini"),
+		LLMTimeout:            durationValue(env["LLM_TIMEOUT"], 20*time.Second),
+		LLMMaxTokensB2C:       positiveInt(env["LLM_MAX_TOKENS_B2C"], 700),
+		LLMMaxTokensB2E:       positiveInt(env["LLM_MAX_TOKENS_B2E"], 350),
+		LLMTemperatureB2C:     positiveFloat(env["LLM_TEMPERATURE_B2C"], 0.35),
+		LLMTemperatureB2E:     positiveFloat(env["LLM_TEMPERATURE_B2E"], 0.2),
 		ConsultantAccessToken: env["CONSULTANT_ACCESS_TOKEN"],
 		AIDebug:               isEnabled(firstNonEmpty(env["AI_DEBUG"], env["LLM_DEBUG"], env["VITE_AI_DEBUG"])),
 		LogLevel:              firstNonEmpty(env["LOG_LEVEL"], "info"),
@@ -119,4 +130,35 @@ func isEnabled(value string) bool {
 	default:
 		return false
 	}
+}
+
+func positiveInt(value string, fallback int) int {
+	number, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || number <= 0 {
+		return fallback
+	}
+	return number
+}
+
+func positiveFloat(value string, fallback float64) float64 {
+	number, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
+	if err != nil || number <= 0 {
+		return fallback
+	}
+	return number
+}
+
+func durationValue(value string, fallback time.Duration) time.Duration {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fallback
+	}
+	if duration, err := time.ParseDuration(value); err == nil && duration > 0 {
+		return duration
+	}
+	seconds, err := strconv.ParseFloat(value, 64)
+	if err != nil || seconds <= 0 {
+		return fallback
+	}
+	return time.Duration(seconds * float64(time.Second))
 }

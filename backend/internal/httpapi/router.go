@@ -36,6 +36,11 @@ type ChatAgent interface {
 	Chat(ctx context.Context, messages []chat.Message, mode chat.Mode) (agent.Result, error)
 }
 
+type StreamingChatAgent interface {
+	ChatAgent
+	Stream(ctx context.Context, messages []chat.Message, mode chat.Mode, emit func(agent.StreamEvent) error) (agent.Result, error)
+}
+
 // Dependencies contains application services used by HTTP handlers.
 type Dependencies struct {
 	Catalog CatalogSearcher
@@ -65,6 +70,7 @@ func NewRouter(cfg config.Config, logger *slog.Logger, deps ...Dependencies) htt
 	mux.HandleFunc("GET /readyz", readinessHandler(cfg))
 	mux.HandleFunc("GET /api/llm", llmConfigHandler(cfg))
 	mux.HandleFunc("POST /api/llm", api.llmPostHandler)
+	mux.HandleFunc("POST /api/llm/stream", api.llmStreamHandler)
 	mux.HandleFunc("GET /api/catalog", api.catalogGetHandler)
 	mux.HandleFunc("POST /api/catalog", api.catalogPostHandler)
 
@@ -98,13 +104,68 @@ func llmConfigHandler(cfg config.Config) http.HandlerFunc {
 }
 
 func (h *apiHandler) llmPostHandler(w http.ResponseWriter, r *http.Request) {
+	messages, mode, ok := h.prepareLLMRequest(w, r)
+	if !ok {
+		return
+	}
+	if h.agent == nil {
+		writeJSON(w, http.StatusOK, llmInProgressResult())
+		return
+	}
+	result, err := h.agent.Chat(r.Context(), messages, mode)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "AI proxy error"})
+		return
+	}
+	writeJSON(w, http.StatusOK, normalizeAgentResult(result))
+}
+
+func (h *apiHandler) llmStreamHandler(w http.ResponseWriter, r *http.Request) {
+	messages, mode, ok := h.prepareLLMRequest(w, r)
+	if !ok {
+		return
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "streaming unsupported"})
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache, no-transform")
+	w.Header().Set("Connection", "keep-alive")
+	w.WriteHeader(http.StatusOK)
+	flusher.Flush()
+
+	if h.agent == nil {
+		_ = writeSSE(w, flusher, "final", normalizeAgentResult(llmInProgressResult()))
+		return
+	}
+
+	emit := func(event agent.StreamEvent) error {
+		return writeSSE(w, flusher, event.Type, event)
+	}
+	var result agent.Result
+	var err error
+	if streamer, ok := h.agent.(StreamingChatAgent); ok {
+		result, err = streamer.Stream(r.Context(), messages, mode, emit)
+	} else {
+		result, err = h.agent.Chat(r.Context(), messages, mode)
+	}
+	if err != nil {
+		_ = writeSSE(w, flusher, "error", map[string]string{"error": "AI proxy error"})
+		return
+	}
+	_ = writeSSE(w, flusher, "final", normalizeAgentResult(result))
+}
+
+func (h *apiHandler) prepareLLMRequest(w http.ResponseWriter, r *http.Request) ([]chat.Message, chat.Mode, bool) {
 	var body struct {
 		Mode     chat.Mode      `json:"mode"`
 		Messages []chat.Message `json:"messages"`
 	}
 	if err := readLimitedJSON(r, llmBodyLimitBytes, &body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
-		return
+		return nil, "", false
 	}
 
 	mode := body.Mode
@@ -113,35 +174,39 @@ func (h *apiHandler) llmPostHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := validateServiceMode(mode, h.cfg.AppMode); err != nil {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
-		return
+		return nil, "", false
 	}
 	if mode == chat.ModeB2E && h.cfg.ConsultantAccessToken != "" && r.Header.Get("x-consultant-token") != h.cfg.ConsultantAccessToken {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
-		return
+		return nil, "", false
 	}
 	if !h.allowRequest(clientKey(r, mode), mode) {
 		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "rate limit exceeded"})
-		return
+		return nil, "", false
 	}
 	messages := normalizeMessages(body.Messages)
 	if len(messages) == 0 {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "empty messages"})
-		return
+		return nil, "", false
 	}
+	return messages, mode, true
+}
 
-	if h.agent == nil {
-		writeJSON(w, http.StatusOK, agent.Result{Text: "Go AI backend rewrite is in progress. Keep production traffic on the existing TypeScript AI route until the agent service is implemented.", Products: []catalogdomain.Product{}, Sources: []catalogdomain.BlogSource{}, Raw: []chat.Message{}, Debug: []agent.DebugStep{}})
-		return
-	}
-	result, err := h.agent.Chat(r.Context(), messages, mode)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "AI proxy error"})
-		return
-	}
+func llmInProgressResult() agent.Result {
+	return agent.Result{Text: "Go AI backend rewrite is in progress. Keep production traffic on the existing TypeScript AI route until the agent service is implemented.", Products: []catalogdomain.Product{}, Sources: []catalogdomain.BlogSource{}, Raw: []chat.Message{}, Debug: []agent.DebugStep{}}
+}
+
+func normalizeAgentResult(result agent.Result) agent.Result {
 	if result.Debug == nil {
 		result.Debug = []agent.DebugStep{}
 	}
-	writeJSON(w, http.StatusOK, result)
+	if result.Products == nil {
+		result.Products = []catalogdomain.Product{}
+	}
+	if result.Sources == nil {
+		result.Sources = []catalogdomain.BlogSource{}
+	}
+	return result
 }
 
 func (h *apiHandler) catalogGetHandler(w http.ResponseWriter, r *http.Request) {
@@ -311,6 +376,18 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 		// Response headers are already committed; there is no safe client-facing fix here.
 		return
 	}
+}
+
+func writeSSE(w http.ResponseWriter, flusher http.Flusher, event string, payload any) error {
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("encode sse %s: %w", event, err)
+	}
+	if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, encoded); err != nil {
+		return fmt.Errorf("write sse %s: %w", event, err)
+	}
+	flusher.Flush()
+	return nil
 }
 
 func securityHeaders(next http.Handler) http.Handler {

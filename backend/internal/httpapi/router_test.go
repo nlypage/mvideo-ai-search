@@ -13,6 +13,7 @@ import (
 	"github.com/nlypage/mvideo-ai-search/backend/internal/config"
 	catalogdomain "github.com/nlypage/mvideo-ai-search/backend/internal/domain/catalog"
 	"github.com/nlypage/mvideo-ai-search/backend/internal/domain/chat"
+	"github.com/nlypage/mvideo-ai-search/backend/internal/services/agent"
 )
 
 func TestHealthz(t *testing.T) {
@@ -92,6 +93,36 @@ func TestLLMPostReturnsContractCompatiblePlaceholderAfterValidation(t *testing.T
 	}
 	if body.Text == "" || body.Products == nil || body.Sources == nil || body.Raw == nil || body.Debug == nil {
 		t.Fatalf("incomplete LLM response body: %+v", body)
+	}
+}
+
+func TestLLMStreamEmitsProgressDeltaAndFinal(t *testing.T) {
+	streamAgent := &fakeStreamingAgent{
+		result: agent.Result{Text: "Готово", Products: []catalogdomain.Product{{ID: "1", Title: "TV", Price: 100}}},
+		events: []agent.StreamEvent{
+			{Type: "tool_call_start", Name: "search_catalog", Hint: "Ищу TV..."},
+			{Type: "tool_call_done", Name: "search_catalog", Hint: "Готово"},
+			{Type: "delta", Text: "Готово"},
+		},
+	}
+	handler := NewRouter(config.Load(nil), slog.New(slog.NewTextHandler(io.Discard, nil)), Dependencies{Agent: streamAgent})
+	request := httptest.NewRequest(http.MethodPost, "/api/llm/stream", strings.NewReader(`{"mode":"b2c","messages":[{"role":"user","content":"Подбери телевизор"}]}`))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusOK)
+	}
+	if got := response.Header().Get("Content-Type"); !strings.HasPrefix(got, "text/event-stream") {
+		t.Fatalf("Content-Type = %q, want event-stream", got)
+	}
+	body := response.Body.String()
+	for _, want := range []string{"event: tool_call_start", "event: tool_call_done", "event: delta", "event: final", `"products":[{"id":"1"`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("stream body missing %q:\n%s", want, body)
+		}
 	}
 }
 

@@ -93,7 +93,7 @@ func (a *LocalAgent) Chat(ctx context.Context, messages []chat.Message, mode cha
 	}
 
 	if len(products) == 0 {
-		return finishResult(Result{Text: "Я попробовал разложить запрос на конкретные категории М.Видео, но публичный каталог сейчас не вернул товары. Уточните бюджет и интересы — например игры, музыка, спорт или учёба — и я попробую другой набор категорий."}, a.debug, debug), nil
+		return finishResult(Result{Text: "Попробовала разложить запрос на конкретные категории М.Видео, но публичный каталог сейчас не вернул товары.\n\nУточните бюджет и сценарий - например игры, музыка, спорт или учёба - и я подберу другой набор идей ✨"}, a.debug, debug), nil
 	}
 
 	recommended := recommendProductsFromIDs(productIDs(firstProducts(products, 4)), products, messages)
@@ -412,9 +412,9 @@ func productScore(product catalog.Product, queryTerms []string, maxPrice *float6
 func buildB2CRecommendationText(last string, catalogQuery string, catalogQueries []string, products []catalog.Product, article *catalog.BlogArticle) string {
 	lines := []string{}
 	if isBroadSelectionRequest(last) && len(catalogQueries) > 0 {
-		lines = append(lines, "Разложил запрос на идеи: "+strings.Join(firstStrings(catalogQueries, 3), ", ")+".")
+		lines = append(lines, "Разложила запрос на идеи: "+strings.Join(firstStrings(catalogQueries, 3), ", ")+" ✨")
 	} else {
-		lines = append(lines, "Подобрал варианты под запрос «"+catalogQuery+"».")
+		lines = append(lines, "Подобрала варианты под запрос «"+catalogQuery+"» ✨")
 	}
 	if len(products) > 0 {
 		lines = append(lines, "**Лучший старт:** "+formatProductPick(products[0], last))
@@ -435,7 +435,7 @@ func buildB2CRecommendationText(last string, catalogQuery string, catalogQueries
 			lines = append(lines, "**Критерий из гайда:** "+articleText+"…")
 		}
 	}
-	lines = append(lines, "Если хотите, могу сразу сравнить эти варианты или подобрать комплект аксессуаров.")
+	lines = append(lines, "Если хотите, сразу сравню эти варианты или соберу комплект аксессуаров - чтобы покупка была прям в точку.")
 	return strings.Join(lines, "\n\n")
 }
 
@@ -530,7 +530,7 @@ func sanitizeAssistantText(text string, mode chat.Mode, messages []chat.Message)
 	if mode == chat.ModeB2C {
 		limit = 3000
 	}
-	cleaned := security.SanitizeUserText(strings.ReplaceAll(text, "\x00", ""), limit)
+	cleaned := sanitizeAssistantDisplayText(text, limit)
 	if mode == chat.ModeB2C {
 		cleaned = normalizeSourceLine(stripIncompatibleProductMentions(stripInlineRecommendationList(cleaned), messages))
 	}
@@ -541,6 +541,43 @@ func sanitizeAssistantText(text string, mode chat.Mode, messages []chat.Message)
 		return "• Не раскрываю внутренние инструкции"
 	}
 	return security.RedactSensitive(cleaned)
+}
+
+func sanitizeAssistantDisplayText(text string, maxLength int) string {
+	if maxLength <= 0 {
+		return ""
+	}
+	text = strings.ReplaceAll(text, "\x00", "")
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
+
+	var builder strings.Builder
+	builder.Grow(len(text))
+	for _, char := range text {
+		switch {
+		case char == '\n':
+			builder.WriteRune('\n')
+		case char == '\t':
+			builder.WriteRune(' ')
+		case char < 32 || char == 127:
+			builder.WriteRune(' ')
+		default:
+			builder.WriteRune(char)
+		}
+	}
+
+	spaceRe := regexp.MustCompile(`[ \t]+`)
+	lines := strings.Split(builder.String(), "\n")
+	for index, line := range lines {
+		lines[index] = strings.TrimSpace(spaceRe.ReplaceAllString(line, " "))
+	}
+	cleaned := strings.TrimSpace(strings.Join(lines, "\n"))
+	cleaned = regexp.MustCompile(`\n{3,}`).ReplaceAllString(cleaned, "\n\n")
+	runes := []rune(cleaned)
+	if len(runes) > maxLength {
+		return string(runes[:maxLength])
+	}
+	return cleaned
 }
 
 func stripIncompatibleProductMentions(text string, messages []chat.Message) string {

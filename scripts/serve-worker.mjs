@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import { createReadStream, existsSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, extname, join, normalize, resolve } from "node:path";
+import { Readable } from "node:stream";
 import worker from "../dist/server/index.js";
 
 const host = process.env.HOST || "0.0.0.0";
@@ -67,8 +68,18 @@ async function sendNodeResponse(res, response) {
     res.end();
     return;
   }
-  const body = Buffer.from(await response.arrayBuffer());
-  res.end(body);
+
+  await new Promise((resolve, reject) => {
+    const stream = Readable.fromWeb(response.body);
+    stream.on("error", (error) => {
+      if (!res.headersSent) res.statusCode = 500;
+      res.destroy(error);
+      reject(error);
+    });
+    res.on("error", reject);
+    res.on("finish", resolve);
+    stream.pipe(res);
+  });
 }
 
 async function readRequestBody(req) {

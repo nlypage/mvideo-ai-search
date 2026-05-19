@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/nlypage/mvideo-ai-search/backend/internal/clients/openai"
+	"github.com/nlypage/mvideo-ai-search/backend/internal/config"
 	catalog "github.com/nlypage/mvideo-ai-search/backend/internal/domain/catalog"
 	"github.com/nlypage/mvideo-ai-search/backend/internal/domain/chat"
 	"github.com/nlypage/mvideo-ai-search/backend/internal/domain/security"
@@ -15,23 +17,84 @@ import (
 
 // ChatCompleter is implemented by OpenAI-compatible clients.
 type ChatCompleter interface {
-	Complete(ctx context.Context, messages []openai.Message, toolSpecs []openai.Tool, toolChoice string, maxTokens int, temperature float64) (openai.Message, error)
+	Complete(ctx context.Context, messages []openai.Message, toolSpecs []openai.Tool, toolChoice any, maxTokens int, temperature float64) (openai.Message, error)
+}
+
+// ChatStreamCompleter is implemented by OpenAI-compatible clients with native SSE support.
+type ChatStreamCompleter interface {
+	CompleteStream(ctx context.Context, messages []openai.Message, toolSpecs []openai.Tool, toolChoice any, maxTokens int, temperature float64, onDelta func(openai.StreamDelta) error) (openai.Message, error)
+}
+
+// UpstreamOptions controls model budget knobs for the upstream agent.
+type UpstreamOptions struct {
+	MaxTokensB2C   int
+	MaxTokensB2E   int
+	TemperatureB2C float64
+	TemperatureB2E float64
+}
+
+// UpstreamOptionsFromConfig maps runtime config into upstream agent options.
+func UpstreamOptionsFromConfig(cfg config.Config) UpstreamOptions {
+	return UpstreamOptions{
+		MaxTokensB2C:   cfg.LLMMaxTokensB2C,
+		MaxTokensB2E:   cfg.LLMMaxTokensB2E,
+		TemperatureB2C: cfg.LLMTemperatureB2C,
+		TemperatureB2E: cfg.LLMTemperatureB2E,
+	}
 }
 
 // UpstreamAgent is an OpenAI-compatible tool-calling agent with TS-route parity guards.
 type UpstreamAgent struct {
-	client ChatCompleter
-	tools  *tools.Registry
-	debug  bool
+	client         ChatCompleter
+	tools          *tools.Registry
+	debug          bool
+	maxTokensB2C   int
+	maxTokensB2E   int
+	temperatureB2C float64
+	temperatureB2E float64
 }
 
 // NewUpstream creates an upstream LLM agent.
-func NewUpstream(client ChatCompleter, registry *tools.Registry, debug bool) *UpstreamAgent {
-	return &UpstreamAgent{client: client, tools: registry, debug: debug}
+func NewUpstream(client ChatCompleter, registry *tools.Registry, debug bool, options ...UpstreamOptions) *UpstreamAgent {
+	opts := upstreamOptionsWithDefaults(options...)
+	return &UpstreamAgent{
+		client:         client,
+		tools:          registry,
+		debug:          debug,
+		maxTokensB2C:   opts.MaxTokensB2C,
+		maxTokensB2E:   opts.MaxTokensB2E,
+		temperatureB2C: opts.TemperatureB2C,
+		temperatureB2E: opts.TemperatureB2E,
+	}
+}
+
+func upstreamOptionsWithDefaults(options ...UpstreamOptions) UpstreamOptions {
+	out := UpstreamOptions{MaxTokensB2C: 700, MaxTokensB2E: 350, TemperatureB2C: 0.35, TemperatureB2E: 0.2}
+	if len(options) == 0 {
+		return out
+	}
+	opt := options[0]
+	if opt.MaxTokensB2C > 0 {
+		out.MaxTokensB2C = opt.MaxTokensB2C
+	}
+	if opt.MaxTokensB2E > 0 {
+		out.MaxTokensB2E = opt.MaxTokensB2E
+	}
+	if opt.TemperatureB2C > 0 {
+		out.TemperatureB2C = opt.TemperatureB2C
+	}
+	if opt.TemperatureB2E > 0 {
+		out.TemperatureB2E = opt.TemperatureB2E
+	}
+	return out
 }
 
 // Chat runs a bounded tool-calling loop.
 func (a *UpstreamAgent) Chat(ctx context.Context, messages []chat.Message, mode chat.Mode) (Result, error) {
+	return a.chat(ctx, messages, mode, nil)
+}
+
+func (a *UpstreamAgent) chat(ctx context.Context, messages []chat.Message, mode chat.Mode, emit func(StreamEvent) error) (Result, error) {
 	messages, refusal := sanitizeConversation(messages, mode)
 	if refusal != nil {
 		return finishResult(*refusal, a.debug, nil), nil
@@ -47,9 +110,12 @@ func (a *UpstreamAgent) Chat(ctx context.Context, messages []chat.Message, mode 
 	blogArticles := []catalog.BlogArticle{}
 	citedSources := []catalog.BlogSource{}
 	catalogCursor := 0
+	toolChoice := any("auto")
 
 	for step := 0; step < 6; step++ {
-		msg, err := a.client.Complete(ctx, convo, toolSpecs(), "auto", maxTokens(mode), temperature(mode))
+		streamContent := canStreamContentDeltas(mode, blogArticles, citedSources)
+		msg, err := a.complete(ctx, convo, toolSpecs(), toolChoice, mode, emit, streamContent)
+		toolChoice = "auto"
 		if err != nil {
 			return Result{}, err
 		}
@@ -64,7 +130,7 @@ func (a *UpstreamAgent) Chat(ctx context.Context, messages []chat.Message, mode 
 				if a.debug {
 					debug = append(debug, DebugStep{Step: step, Type: "decision", Title: "Требую структурный источник", Detail: "Ответ опирается на прочитанную статью, но cite_blog_source ещё не вызван."})
 				}
-				convo = append(convo, openai.Message{Role: "system", Content: "Ты использовал данные search_blog/article.content. Перед финальным ответом обязательно вызови cite_blog_source с title и url этой статьи. Не пиши строку 'Источник:' текстом."})
+				toolChoice = forceToolChoice("cite_blog_source")
 				continue
 			}
 			products := finalProducts(messages, searchProducts, recommendedProducts)
@@ -74,7 +140,8 @@ func (a *UpstreamAgent) Chat(ctx context.Context, messages []chat.Message, mode 
 		if a.debug {
 			debug = append(debug, DebugStep{Step: step, Type: "decision", Title: "Агент выбрал инструменты", Args: toolCallNames(msg.ToolCalls)})
 		}
-		for _, call := range msg.ToolCalls {
+		preparedCalls := make([]preparedToolCall, len(msg.ToolCalls))
+		for index, call := range msg.ToolCalls {
 			args := parseToolArgs(call.Function.Arguments)
 			if call.Function.Name == "search_catalog" {
 				var changed bool
@@ -84,11 +151,16 @@ func (a *UpstreamAgent) Chat(ctx context.Context, messages []chat.Message, mode 
 					debug = append(debug, DebugStep{Step: step, Type: "decision", Title: "Нормализовал запрос каталога", Args: map[string]any{"query": args.Query, "maxPrice": args.MaxPrice, "limit": args.Limit}})
 				}
 			}
+			preparedCalls[index] = preparedToolCall{Call: call, Args: args}
+		}
 
-			result, err := a.runTool(ctx, call.Function.Name, args, searchProducts, messages)
-			if err != nil {
-				return Result{}, err
-			}
+		toolResults, err := a.runToolCallsConcurrently(ctx, preparedCalls, searchProducts, messages, step, emit)
+		if err != nil {
+			return Result{}, err
+		}
+		for _, completed := range toolResults {
+			call := completed.Call
+			result := completed.Result
 			if len(result.Products) > 0 {
 				if call.Function.Name == "recommend_products" {
 					recommendedProducts = append(recommendedProducts, result.Products...)
@@ -123,8 +195,89 @@ func (a *UpstreamAgent) Chat(ctx context.Context, messages []chat.Message, mode 
 	if a.debug {
 		debug = append(debug, DebugStep{Step: 6, Type: "assistant", Title: "Лимит инструментов достигнут", Detail: "Запрашиваю финальный ответ у модели без инструментов по уже собранным данным."})
 	}
-	result := a.finalNoToolsAnswer(ctx, convo, messages, mode, searchProducts, recommendedProducts, citedSources)
+	result := a.finalNoToolsAnswer(ctx, convo, messages, mode, searchProducts, recommendedProducts, citedSources, emit)
 	return finishResult(result, a.debug, debug), nil
+}
+
+func (a *UpstreamAgent) complete(ctx context.Context, convo []openai.Message, specs []openai.Tool, toolChoice any, mode chat.Mode, emit func(StreamEvent) error, streamContent bool) (openai.Message, error) {
+	if emit != nil && streamContent {
+		if streamer, ok := a.client.(ChatStreamCompleter); ok {
+			return streamer.CompleteStream(ctx, convo, specs, toolChoice, a.maxTokens(mode), a.temperature(mode), func(delta openai.StreamDelta) error {
+				if delta.Content == "" {
+					return nil
+				}
+				return emit(StreamEvent{Type: "delta", Text: delta.Content})
+			})
+		}
+	}
+	return a.client.Complete(ctx, convo, specs, toolChoice, a.maxTokens(mode), a.temperature(mode))
+}
+
+func canStreamContentDeltas(mode chat.Mode, blogArticles []catalog.BlogArticle, citedSources []catalog.BlogSource) bool {
+	return mode != chat.ModeB2C || len(blogArticles) == 0 || len(citedSources) > 0
+}
+
+type preparedToolCall struct {
+	Call openai.ToolCall
+	Args tools.Args
+}
+
+type completedToolCall struct {
+	Call   openai.ToolCall
+	Result tools.Result
+}
+
+func (a *UpstreamAgent) runToolCallsConcurrently(ctx context.Context, calls []preparedToolCall, searchProducts []catalog.Product, messages []chat.Message, step int, emit func(StreamEvent) error) ([]completedToolCall, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	results := make([]completedToolCall, len(calls))
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var emitMu sync.Mutex
+	var firstErr error
+	emitSafe := func(event StreamEvent) error {
+		if emit == nil {
+			return nil
+		}
+		emitMu.Lock()
+		defer emitMu.Unlock()
+		return emit(event)
+	}
+	setErr := func(err error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if firstErr == nil {
+			firstErr = err
+			cancel()
+		}
+	}
+	for index, call := range calls {
+		wg.Add(1)
+		go func(index int, call preparedToolCall) {
+			defer wg.Done()
+			name := call.Call.Function.Name
+			if err := emitSafe(StreamEvent{Type: "tool_call_start", Name: name, Hint: toolProgressHint(name, call.Args), Step: step}); err != nil {
+				setErr(err)
+				return
+			}
+			result, err := a.runTool(ctx, name, call.Args, searchProducts, messages)
+			if err != nil {
+				setErr(err)
+				return
+			}
+			results[index] = completedToolCall{Call: call.Call, Result: result}
+			if err := emitSafe(StreamEvent{Type: "tool_call_done", Name: name, Hint: "Готово", Step: step}); err != nil {
+				setErr(err)
+				return
+			}
+		}(index, call)
+	}
+	wg.Wait()
+	if firstErr != nil {
+		return nil, firstErr
+	}
+	return results, nil
 }
 
 func (a *UpstreamAgent) runTool(ctx context.Context, name string, args tools.Args, searchProducts []catalog.Product, messages []chat.Message) (tools.Result, error) {
@@ -138,11 +291,19 @@ func (a *UpstreamAgent) runTool(ctx context.Context, name string, args tools.Arg
 	return a.tools.Run(ctx, name, args)
 }
 
-func (a *UpstreamAgent) finalNoToolsAnswer(ctx context.Context, convo []openai.Message, messages []chat.Message, mode chat.Mode, searchProducts []catalog.Product, recommendedProducts []catalog.Product, citedSources []catalog.BlogSource) Result {
+func forceToolChoice(name string) map[string]any {
+	return map[string]any{"type": "function", "function": map[string]string{"name": name}}
+}
+
+func (a *UpstreamAgent) finalNoToolsAnswer(ctx context.Context, convo []openai.Message, messages []chat.Message, mode chat.Mode, searchProducts []catalog.Product, recommendedProducts []catalog.Product, citedSources []catalog.BlogSource, emit func(StreamEvent) error) Result {
 	fallback := gracefulToolLimitAnswer(messages, searchProducts, recommendedProducts)
+	fallback.Sources = dedupeSources(citedSources)
+	if (len(recommendedProducts) > 0 || len(searchProducts) > 0) && lastAssistantContent(convo) != "" {
+		return fallback
+	}
 	finalConvo := append([]openai.Message(nil), convo...)
 	finalConvo = append(finalConvo, openai.Message{Role: "system", Content: "Инструменты больше недоступны. Не вызывай tools. Ответь пользователю по уже собранным результатам каталога, статей и отзывов. Не упоминай лимит инструментов или технические ошибки."})
-	msg, err := a.client.Complete(ctx, finalConvo, nil, "", maxTokens(mode), temperature(mode))
+	msg, err := a.complete(ctx, finalConvo, nil, "", mode, emit, true)
 	if err != nil || strings.TrimSpace(msg.Content) == "" {
 		return fallback
 	}
@@ -186,18 +347,27 @@ func finalProducts(messages []chat.Message, searchProducts []catalog.Product, re
 	return firstProducts(rankProductsForUserIntent(dedupeProducts(filterProductsForUserIntent(base, messages)), lastUserText(messages)), 4)
 }
 
-func maxTokens(mode chat.Mode) int {
+func (a *UpstreamAgent) maxTokens(mode chat.Mode) int {
 	if mode == chat.ModeB2E {
-		return 350
+		return a.maxTokensB2E
 	}
-	return 700
+	return a.maxTokensB2C
 }
 
-func temperature(mode chat.Mode) float64 {
+func (a *UpstreamAgent) temperature(mode chat.Mode) float64 {
 	if mode == chat.ModeB2E {
-		return 0.2
+		return a.temperatureB2E
 	}
-	return 0.35
+	return a.temperatureB2C
+}
+
+func lastAssistantContent(messages []openai.Message) string {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == "assistant" {
+			return strings.TrimSpace(messages[i].Content)
+		}
+	}
+	return ""
 }
 
 func parseToolArgs(raw string) tools.Args {
@@ -307,7 +477,13 @@ func toolCallNames(calls []openai.ToolCall) []string {
 	return names
 }
 
+var defaultToolSpecs = buildToolSpecs()
+
 func toolSpecs() []openai.Tool {
+	return defaultToolSpecs
+}
+
+func buildToolSpecs() []openai.Tool {
 	object := func(properties map[string]any, required []string) map[string]any {
 		return map[string]any{"type": "object", "additionalProperties": false, "properties": properties, "required": required}
 	}
