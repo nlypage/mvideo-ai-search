@@ -19,14 +19,14 @@ export function ProductCard({
   compact?: boolean;
 }) {
   return (
-    <div className="rounded-lg border border-border bg-card p-3 flex gap-3">
+    <div className="flex min-w-0 gap-3 rounded-lg border border-border bg-card p-3 max-[360px]:flex-col">
       <img
         src={product.image}
         alt={product.title}
-        className={`${compact ? "h-16 w-16" : "h-24 w-24"} flex-shrink-0 rounded-md bg-white object-cover`}
+        className={`${compact ? "h-16 w-16" : "h-24 w-24"} flex-shrink-0 rounded-md bg-white object-cover max-[360px]:h-20 max-[360px]:w-20`}
         loading="lazy"
       />
-      <div className="flex-1 min-w-0 flex flex-col">
+      <div className="flex min-w-0 flex-1 flex-col">
         <a
           href={product.url}
           target="_blank"
@@ -35,17 +35,17 @@ export function ProductCard({
         >
           {product.title}
         </a>
-        <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
-          <span className="inline-flex items-center gap-0.5">
+        <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+          <span className="inline-flex shrink-0 items-center gap-0.5">
             <Star className="h-3 w-3 fill-amber-400 stroke-amber-400" />
             {product.rating}
           </span>
-          <span>· {product.reviews} отзывов</span>
+          <span className="min-w-0 truncate">· {product.reviews} отзывов</span>
           <a
             href={product.url}
             target="_blank"
             rel="noreferrer"
-            className="ml-auto inline-flex items-center gap-0.5 hover:text-[var(--mv-red)]"
+            className="inline-flex shrink-0 items-center gap-0.5 hover:text-[var(--mv-red)] sm:ml-auto"
           >
             mvideo.ru <ExternalLink className="h-3 w-3" />
           </a>
@@ -71,7 +71,7 @@ export function ProductCard({
           </div>
         )}
 
-        <div className="mt-2 flex items-end justify-between gap-2">
+        <div className="mt-2 flex flex-wrap items-end justify-between gap-2">
           <div>
             <div className="text-lg font-bold leading-none">
               {product.price.toLocaleString("ru")} ₽
@@ -85,7 +85,7 @@ export function ProductCard({
           {onAdd && (
             <button
               onClick={() => onAdd(product)}
-              className="inline-flex items-center gap-1 rounded-md bg-[var(--mv-red)] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[var(--mv-red-dark)] transition-colors"
+              className="inline-flex items-center gap-1 rounded-md bg-[var(--mv-red)] px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-[var(--mv-red-dark)]"
             >
               <ShoppingCart className="h-3.5 w-3.5" /> В корзину
             </button>

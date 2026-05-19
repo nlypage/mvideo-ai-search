@@ -218,9 +218,9 @@ export function B2EConsole() {
   ];
 
   return (
-    <div className="min-h-screen bg-muted/30 lg:flex lg:h-screen">
+    <div className="min-h-screen min-w-0 overflow-x-hidden bg-muted/30 xl:flex xl:h-screen">
       {/* Sidebar */}
-      <aside className="hidden w-60 border-r border-border bg-white lg:flex lg:flex-col">
+      <aside className="hidden w-56 border-r border-border bg-white xl:flex xl:flex-col">
         <div className="flex items-center gap-3 border-b border-border p-4">
           <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--mv-red)] font-bold text-white">
             ИП
@@ -268,16 +268,16 @@ export function B2EConsole() {
         </div>
       </aside>
 
-      <div className="border-b border-border bg-white px-3 py-3 lg:hidden">
-        <div className="mb-3 flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[var(--mv-red)] text-sm font-bold text-white">
+      <div className="border-b border-border bg-white px-3 py-3 xl:hidden">
+        <div className="mb-3 flex items-center gap-2 sm:gap-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--mv-red)] text-sm font-bold text-white">
             ИП
           </div>
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <div className="truncate text-sm font-semibold">Иван Петров</div>
-            <div className="text-xs text-muted-foreground">Консультант · ТЦ Авиапарк</div>
+            <div className="truncate text-xs text-muted-foreground">Консультант · ТЦ Авиапарк</div>
           </div>
-          <div className="ml-auto text-right text-xs text-muted-foreground">
+          <div className="shrink-0 text-right text-xs text-muted-foreground">
             <div>
               Смена <span className="font-semibold text-emerald-600">активна</span>
             </div>
@@ -304,16 +304,16 @@ export function B2EConsole() {
               }`}
             >
               <it.icon className="h-4 w-4" />
-              <span className="truncate">{it.label}</span>
+              <span className="hidden truncate min-[360px]:inline">{it.label}</span>
             </button>
           ))}
         </nav>
       </div>
 
       {/* Workspace */}
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_300px] lg:flex-1 lg:grid-cols-[minmax(0,1fr)_360px] lg:gap-0">
+      <div className="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_320px] xl:flex-1 xl:grid-cols-[minmax(0,1fr)_360px] xl:gap-0">
         {/* Chat column */}
-        <section className="flex min-h-[58dvh] flex-col bg-white md:min-h-[calc(100dvh-16rem)] lg:min-h-0 lg:border-r lg:border-border">
+        <section className="flex min-h-[58dvh] min-w-0 flex-col bg-white lg:min-h-[calc(100dvh-7rem)] lg:border-r lg:border-border xl:min-h-0">
           <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-3 sm:px-5">
             <Sparkles className="h-4 w-4 text-[var(--mv-red)]" />
             <div className="text-sm font-semibold">ИИ-помощник консультанта</div>
@@ -351,7 +351,7 @@ export function B2EConsole() {
                       )}
                     </div>
                     {m.products && m.products.length > 0 && (
-                      <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                      <div className="mt-2 grid min-w-0 gap-2 sm:grid-cols-2">
                         {m.products.map((p) => (
                           <ProductCard key={p.id} product={p} showStock showMargin compact />
                         ))}
@@ -405,7 +405,7 @@ export function B2EConsole() {
         </section>
 
         {/* Plan column */}
-        <aside className="space-y-4 border-t border-border bg-muted/20 p-3 sm:p-4 md:border-t-0 lg:overflow-y-auto">
+        <aside className="min-w-0 space-y-4 border-t border-border bg-muted/20 p-3 sm:p-4 lg:max-h-[calc(100dvh-7rem)] lg:overflow-y-auto lg:border-t-0 xl:max-h-none">
           {showDebugPanel && (
             <AgentDebugPanel
               steps={debugSteps}
