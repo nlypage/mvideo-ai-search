@@ -42,6 +42,14 @@ export type LLMResult = {
   debug?: AgentDebugStep[];
 };
 
+export type AgentStreamEvent = {
+  type: string;
+  name?: string;
+  hint?: string;
+  step?: number;
+  detail?: string;
+};
+
 export type RuntimeAiConfig = {
   configured: boolean;
   model: string;
@@ -81,9 +89,30 @@ export async function searchCatalogProducts(query: string): Promise<Product[]> {
   return data.products || [];
 }
 
-export async function chatLLM(
+function safeChatMessages(messages: ChatMessage[]) {
+  return messages
+    .filter((m) => m.role === "user" || m.role === "assistant")
+    .slice(-12)
+    .map((m) => ({ role: m.role, content: String(m.content ?? "").slice(0, 2000) }));
+}
+
+function normalizeLLMResult(data: LLMResult, fallbackRaw: ChatMessage[]) {
+  return {
+    text: data.text || "",
+    products: data.products || [],
+    sources: data.sources || [],
+    raw: data.raw || fallbackRaw,
+    debug: data.debug,
+  };
+}
+
+export async function chatLLMStream(
   messages: ChatMessage[],
   opts: { mode: "b2c" | "b2e" },
+  handlers: {
+    onDelta?: (text: string) => void;
+    onEvent?: (event: AgentStreamEvent) => void;
+  } = {},
 ): Promise<{
   text: string;
   products?: Product[];
@@ -91,14 +120,10 @@ export async function chatLLM(
   raw: ChatMessage[];
   debug?: AgentDebugStep[];
 }> {
-  const safeMessages = messages
-    .filter((m) => m.role === "user" || m.role === "assistant")
-    .slice(-12)
-    .map((m) => ({ role: m.role, content: String(m.content ?? "").slice(0, 2000) }));
-
-  const res = await fetch("/api/llm", {
+  const safeMessages = safeChatMessages(messages);
+  const res = await fetch("/api/llm/stream", {
     method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
     body: JSON.stringify({ mode: opts.mode, messages: safeMessages }),
   });
 
@@ -106,13 +131,63 @@ export async function chatLLM(
     const t = await res.text();
     throw new Error(`LLM ${res.status}: ${t.slice(0, 200)}`);
   }
+  if (!res.body) {
+    const data = (await res.json()) as LLMResult;
+    return normalizeLLMResult(data, safeMessages);
+  }
 
-  const data = (await res.json()) as LLMResult;
-  return {
-    text: data.text || "",
-    products: data.products || [],
-    sources: data.sources || [],
-    raw: data.raw || safeMessages,
-    debug: data.debug,
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let accumulated = "";
+  let finalResult: LLMResult | null = null;
+  let streamError: Error | null = null;
+
+  const dispatch = (block: string) => {
+    const lines = block.split(/\r?\n/);
+    let event = "message";
+    const data: string[] = [];
+    for (const line of lines) {
+      if (line.startsWith("event:")) event = line.slice(6).trim();
+      if (line.startsWith("data:")) data.push(line.slice(5).trimStart());
+    }
+    if (data.length === 0) return;
+    const payload = JSON.parse(data.join("\n"));
+    if (event === "delta") {
+      const text = String(payload.text ?? "");
+      accumulated += text;
+      handlers.onDelta?.(text);
+      return;
+    }
+    if (event === "final") {
+      finalResult = payload as LLMResult;
+      return;
+    }
+    if (event === "error") {
+      streamError = new Error(String(payload.error ?? "AI proxy error"));
+      return;
+    }
+    handlers.onEvent?.({ ...(payload as AgentStreamEvent), type: event });
   };
+
+  while (true) {
+    const { value, done } = await reader.read();
+    buffer += decoder.decode(value, { stream: !done });
+    let boundary = buffer.indexOf("\n\n");
+    while (boundary >= 0) {
+      dispatch(buffer.slice(0, boundary));
+      buffer = buffer.slice(boundary + 2);
+      boundary = buffer.indexOf("\n\n");
+    }
+    if (streamError) throw streamError;
+    if (done) break;
+  }
+  if (buffer.trim()) dispatch(buffer);
+  if (streamError) throw streamError;
+
+  const result = finalResult || { text: accumulated };
+  if (accumulated.trim()) {
+    result.text = accumulated;
+  }
+  return normalizeLLMResult(result, safeMessages);
 }

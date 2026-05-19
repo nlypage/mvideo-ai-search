@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import {
-  Sparkles,
   Send,
   ChevronDown,
   ChevronUp,
@@ -10,15 +9,20 @@ import {
   BookOpen,
   ExternalLink,
 } from "lucide-react";
+import { AgentDebugPanel } from "./AgentDebugPanel";
+import { AgentStreamStatus } from "./AgentStreamStatus";
+import { EmViAvatar } from "./EmViAvatar";
 import {
-  chatLLM,
+  chatLLMStream,
   searchCatalogProducts,
   type AgentDebugStep,
+  type AgentStreamEvent,
   isOffTopic,
   type ChatMessage,
   type Product,
   type SourceCitation,
 } from "@/lib/mv-llm";
+import { resolveAgentDebugPanelVisibility } from "@/lib/agent-debug";
 
 type Turn = {
   id: string;
@@ -69,7 +73,7 @@ function SourceCitations({ sources }: { sources: Source[] }) {
   return (
     <div className="mt-3 rounded-xl border border-[var(--mv-red)]/25 bg-white/80 backdrop-blur p-2.5">
       <div className="flex items-center gap-1.5 mb-2 text-[10px] font-bold uppercase tracking-wider text-[var(--mv-red)]">
-        <BookOpen className="h-3 w-3" /> Обоснование · блог М.Видео
+        <BookOpen className="h-3 w-3" /> Источники
       </div>
       <div className="space-y-1.5">
         {sources.map((s) => (
@@ -98,6 +102,25 @@ function SourceCitations({ sources }: { sources: Source[] }) {
   );
 }
 
+function SourceChips({ sources }: { sources: Source[] }) {
+  return (
+    <div className="mt-3 flex flex-wrap gap-1.5">
+      {sources.map((source) => (
+        <a
+          key={source.url}
+          href={source.url}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-border bg-white/85 px-2.5 py-1 text-xs text-muted-foreground transition hover:border-[var(--mv-red)]/40 hover:text-foreground"
+        >
+          <BookOpen className="h-3 w-3 shrink-0 text-[var(--mv-red)]" />
+          <span className="truncate">{hostnameOf(source.url)}</span>
+        </a>
+      ))}
+    </div>
+  );
+}
+
 function hostnameOf(url: string): string {
   try {
     return new URL(url).hostname.replace(/^www\./, "");
@@ -105,13 +128,6 @@ function hostnameOf(url: string): string {
     return url;
   }
 }
-
-const AGENT_STEPS = [
-  "Читаю статьи М.Клик…",
-  "Смотрю отзывы покупателей…",
-  "Сверяю характеристики товаров…",
-  "Формулирую рекомендацию…",
-];
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "неизвестная ошибка";
@@ -139,21 +155,68 @@ export function SearchResults({
   const [debugSteps, setDebugSteps] = useState<AgentDebugStep[]>([]);
   const [loading, setLoading] = useState(false);
   const [catalogLoading, setCatalogLoading] = useState(false);
-  const [agentStep, setAgentStep] = useState(0);
+  const [progressEvents, setProgressEvents] = useState<AgentStreamEvent[]>([]);
   const [followUp, setFollowUp] = useState("");
-  const [expanded, setExpanded] = useState(true);
+  const [fullyOpen, setFullyOpen] = useState(false);
+  const [showDebugPanel, setShowDebugPanel] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Catalog results are independent from the assistant answer.
   const allHits: Product[] = query.trim() ? catalogProducts : [];
+  const latestAssistantTurn = [...turns].reverse().find((turn) => turn.role === "assistant");
+  const latestAssistantText = latestAssistantTurn?.text.trim() || "";
+  const latestAnswer = extractSources(latestAssistantText);
+  const latestSources = mergeSources(latestAnswer.sources, latestAssistantTurn?.sources || []);
+  const latestProducts = mergeProducts([], latestAssistantTurn?.products || []);
+  const selectedDebugProducts = mergeProducts(
+    [],
+    turns.flatMap((turn) => turn.products || []),
+  );
+  const hasAnyAssistantContent = turns.some(
+    (turn) =>
+      turn.role === "assistant" &&
+      (turn.text.trim() !== "" || Boolean(turn.sources?.length) || Boolean(turn.products?.length)),
+  );
+  const hasAnswer = hasAnyAssistantContent || (fullyOpen && turns.length > 0);
+  const streamingTextStarted = loading && latestAssistantText !== "";
+  const isCompactAnswer =
+    latestAssistantText.startsWith("Ошибка:") ||
+    latestAssistantText.startsWith("Помогаю только") ||
+    latestAssistantText.startsWith("Отвечаю только");
+  const hasExpandableContent =
+    !isCompactAnswer &&
+    (loading ||
+      latestAnswer.body.length > 420 ||
+      latestSources.length > 0 ||
+      latestProducts.length > 0 ||
+      turns.length > 2);
+  const answerRequestText = turns.find((turn) => turn.role === "user")?.text || query;
+
+  useEffect(() => {
+    let cancelled = false;
+    resolveAgentDebugPanelVisibility().then((enabled) => {
+      if (!cancelled) setShowDebugPanel(enabled);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!fullyOpen) return;
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+  }, [fullyOpen, loading, turns]);
 
   // Kick off AI when initial query changes
   useEffect(() => {
+    setFullyOpen(false);
     if (!query.trim()) {
       setTurns([]);
       setCatalogProducts([]);
       setDebugSteps([]);
+      setProgressEvents([]);
       setCatalogLoading(false);
+      setLoading(false);
       return;
     }
     let cancelled = false;
@@ -164,20 +227,25 @@ export function SearchResults({
         {
           id: "a0",
           role: "assistant",
-          text: "Я помогаю только с выбором техники в М.Видео. Сформулируйте, пожалуйста, что вы ищете 🙂",
+          text: "Помогаю только с выбором техники в М.Видео. Сформулируйте, пожалуйста, что вы ищете 🙂",
         },
       ]);
       setCatalogProducts([]);
       setDebugSteps([]);
+      setProgressEvents([]);
       setCatalogLoading(false);
+      setLoading(false);
       return;
     }
-    setTurns([{ id: "u0", role: "user", text: trimmed }]);
+    setTurns([
+      { id: "u0", role: "user", text: trimmed },
+      { id: "a0", role: "assistant", text: "" },
+    ]);
     setCatalogProducts([]);
     setDebugSteps([]);
+    setProgressEvents([]);
     setLoading(true);
     setCatalogLoading(true);
-    setAgentStep(0);
 
     (async () => {
       try {
@@ -191,26 +259,45 @@ export function SearchResults({
     (async () => {
       try {
         const history: ChatMessage[] = [{ role: "user", content: trimmed }];
-        const res = await chatLLM(history, { mode: "b2c" });
-        if (cancelled) return;
-        setTurns((t) => [
-          ...t,
+        const res = await chatLLMStream(
+          history,
+          { mode: "b2c" },
           {
-            id: "a0",
-            role: "assistant",
-            text: res.text,
-            sources: res.sources,
-            products: mergeProducts([], res.products),
-            requestText: trimmed,
+            onDelta: (chunk) => {
+              if (cancelled) return;
+              setTurns((items) =>
+                items.map((item) =>
+                  item.id === "a0" ? { ...item, text: item.text + chunk } : item,
+                ),
+              );
+            },
+            onEvent: (event) => {
+              if (!cancelled) setProgressEvents((events) => [...events, event]);
+            },
           },
-        ]);
+        );
+        if (cancelled) return;
+        setTurns((t) =>
+          t.map((item) =>
+            item.id === "a0"
+              ? {
+                  ...item,
+                  text: res.text,
+                  sources: res.sources,
+                  products: mergeProducts([], res.products),
+                  requestText: trimmed,
+                }
+              : item,
+          ),
+        );
         if (res.debug?.length) setDebugSteps(res.debug);
       } catch (error: unknown) {
         if (cancelled) return;
-        setTurns((t) => [
-          ...t,
-          { id: "a0", role: "assistant", text: `Ошибка: ${errorMessage(error)}` },
-        ]);
+        setTurns((t) =>
+          t.map((item) =>
+            item.id === "a0" ? { ...item, text: `Ошибка: ${errorMessage(error)}` } : item,
+          ),
+        );
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -220,20 +307,11 @@ export function SearchResults({
     };
   }, [query]);
 
-  useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-  }, [turns, loading]);
-
-  useEffect(() => {
-    if (!loading) return;
-    const timer = window.setInterval(() => setAgentStep((step) => (step + 1) % 4), 1800);
-    return () => window.clearInterval(timer);
-  }, [loading]);
-
-  async function sendFollowUp() {
-    const text = followUp.trim().slice(0, 500);
+  async function sendFollowUp(nextText?: string) {
+    const text = (nextText || followUp).trim().slice(0, 500);
     if (!text || loading) return;
     setFollowUp("");
+    setFullyOpen(true);
     if (isOffTopic(text)) {
       setTurns((t) => [
         ...t,
@@ -241,34 +319,56 @@ export function SearchResults({
         {
           id: crypto.randomUUID(),
           role: "assistant",
-          text: "Я отвечаю только по технике М.Видео — давайте вернёмся к выбору устройства.",
+          text: "Отвечаю только по технике М.Видео - давайте вернёмся к выбору устройства 🙂",
         },
       ]);
       return;
     }
-    const next: Turn[] = [...turns, { id: crypto.randomUUID(), role: "user", text }];
+    const assistantId = crypto.randomUUID();
+    const next: Turn[] = [
+      ...turns,
+      { id: crypto.randomUUID(), role: "user", text },
+      { id: assistantId, role: "assistant", text: "" },
+    ];
     setTurns(next);
+    setProgressEvents([]);
     setLoading(true);
     try {
       const history: ChatMessage[] = [...next.map((t) => ({ role: t.role, content: t.text }))];
-      const res = await chatLLM(history, { mode: "b2c" });
-      setTurns((t) => [
-        ...t,
+      const res = await chatLLMStream(
+        history,
+        { mode: "b2c" },
         {
-          id: crypto.randomUUID(),
-          role: "assistant",
-          text: res.text,
-          sources: res.sources,
-          products: mergeProducts([], res.products),
-          requestText: text,
+          onDelta: (chunk) => {
+            setTurns((items) =>
+              items.map((item) =>
+                item.id === assistantId ? { ...item, text: item.text + chunk } : item,
+              ),
+            );
+          },
+          onEvent: (event) => setProgressEvents((events) => [...events, event]),
         },
-      ]);
+      );
+      setTurns((t) =>
+        t.map((item) =>
+          item.id === assistantId
+            ? {
+                ...item,
+                text: res.text,
+                sources: res.sources,
+                products: mergeProducts([], res.products),
+                requestText: text,
+              }
+            : item,
+        ),
+      );
       if (res.debug?.length) setDebugSteps((current) => [...current, ...res.debug!]);
     } catch (error: unknown) {
-      setTurns((t) => [
-        ...t,
-        { id: crypto.randomUUID(), role: "assistant", text: `Ошибка: ${errorMessage(error)}` },
-      ]);
+      setTurns((t) =>
+        t.map((item) =>
+          item.id === assistantId ? { ...item, text: `Ошибка: ${errorMessage(error)}` } : item,
+        ),
+      );
     } finally {
       setLoading(false);
     }
@@ -276,126 +376,185 @@ export function SearchResults({
 
   if (!query.trim()) {
     return (
-      <div className="mx-auto max-w-3xl px-4 py-16 text-center">
-        <div className="inline-flex h-14 w-14 items-center justify-center rounded-full bg-[var(--mv-red)]/10 mb-4">
-          <Sparkles className="h-7 w-7 text-[var(--mv-red)]" />
-        </div>
-        <h1 className="text-2xl font-bold mb-2">Умный поиск М.Видео</h1>
-        <p className="text-muted-foreground">
-          Введите запрос в строке поиска — ИИ-ассистент подберёт технику и объяснит выбор.
-        </p>
-        <div className="mt-6 flex flex-wrap justify-center gap-2 text-sm">
-          {[
-            "OLED-телевизор для PS5 до 250 000",
-            "Подарок подростку до 5 000",
-            "Ноутбук для разработки до 120 000",
-            "Саундбар к ТВ до 40 000",
-          ].map((s) => (
-            <button
-              key={s}
-              type="button"
-              onClick={() => onPickSuggestion?.(s)}
-              className="rounded-full border border-border bg-white px-3 py-1.5 text-foreground/70 hover:border-[var(--mv-red)] hover:text-[var(--mv-red)] hover:bg-red-50/50 transition-colors cursor-pointer"
-            >
-              {s}
-            </button>
-          ))}
+      <div className="mx-auto max-w-6xl px-4 py-9 sm:py-12">
+        <div className="mx-auto max-w-3xl text-center">
+          <h1 className="mb-3 text-2xl font-bold sm:text-[2rem]">Что подбираем сегодня?</h1>
+          <div className="mt-6 text-xs font-semibold text-muted-foreground sm:text-sm">
+            Часто ищут
+          </div>
+          <div className="mt-3 flex flex-wrap justify-center gap-2 text-xs sm:text-sm">
+            {[
+              "OLED-телевизор для PS5 до 250 000",
+              "Подарок подростку до 5 000",
+              "Ноутбук для разработки до 120 000",
+              "Саундбар к ТВ до 40 000",
+            ].map((s) => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => onPickSuggestion?.(s)}
+                className="cursor-pointer rounded-full border border-border bg-white px-3 py-1.5 text-foreground/70 transition-colors hover:border-[var(--mv-red)] hover:bg-red-50/50 hover:text-[var(--mv-red)]"
+              >
+                {s}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="mx-auto max-w-[1200px] px-4 py-6 grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6">
+    <div className="mx-auto grid max-w-[1200px] grid-cols-1 gap-4 px-3 py-4 sm:gap-6 sm:px-4 sm:py-6 lg:grid-cols-[1fr_320px]">
       <div className="min-w-0">
-        {/* AI Answer card */}
-        <section className="rounded-2xl border border-[var(--mv-red)]/30 bg-gradient-to-br from-red-50/60 to-white shadow-sm overflow-hidden mb-6">
-          <header className="flex items-center gap-2 px-4 py-3 border-b border-[var(--mv-red)]/15 bg-white/60">
-            <div className="h-7 w-7 rounded-full bg-[var(--mv-red)] flex items-center justify-center">
-              <Sparkles className="h-3.5 w-3.5 text-white" />
-            </div>
-            <div className="text-sm font-semibold">Ответ ИИ-ассистента</div>
-            <span className="ml-1 text-[10px] uppercase tracking-wider text-[var(--mv-red)] font-bold bg-[var(--mv-red)]/10 px-1.5 py-0.5 rounded">
-              beta
-            </span>
-            <button
-              onClick={() => setExpanded((e) => !e)}
-              className="ml-auto inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-            >
-              {expanded ? (
-                <>
-                  Свернуть <ChevronUp className="h-3 w-3" />
-                </>
-              ) : (
-                <>
-                  Развернуть <ChevronDown className="h-3 w-3" />
-                </>
-              )}
-            </button>
-          </header>
+        {loading && !fullyOpen && !hasAnyAssistantContent && (
+          <AgentStreamStatus
+            events={progressEvents}
+            hasText={streamingTextStarted}
+            fallback={catalogLoading ? "смотрю каталог М.Видео" : "формулирую ответ"}
+          />
+        )}
 
-          {expanded && (
-            <>
-              <div ref={scrollRef} className="px-4 py-3 max-h-[480px] overflow-y-auto space-y-3">
-                {turns.map((t) => {
-                  if (t.role === "user") {
+        {hasAnswer && (
+          <section className="mb-5 overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-red-50/60 via-white to-cyan-50/35 shadow-sm sm:mb-6">
+            <header className="flex items-center gap-2 border-b border-border/70 bg-white/75 px-3 py-3 sm:px-4">
+              <EmViAvatar className="h-8 w-8" />
+              <div className="min-w-0">
+                <div className="text-sm font-semibold">Ответ Эм.Ви</div>
+                <div className="truncate text-xs text-muted-foreground">
+                  по запросу: «{answerRequestText}»
+                </div>
+              </div>
+              {fullyOpen && hasExpandableContent && (
+                <button
+                  type="button"
+                  onClick={() => setFullyOpen(false)}
+                  className="ml-auto inline-flex items-center gap-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  Свернуть <ChevronUp className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </header>
+
+            {fullyOpen ? (
+              <>
+                <div
+                  ref={scrollRef}
+                  className="max-h-[62dvh] space-y-2.5 overflow-y-auto px-3 py-3 sm:max-h-[460px] sm:px-4"
+                >
+                  {turns.map((turn) => {
+                    if (turn.role === "user") {
+                      return (
+                        <div key={turn.id} className="flex justify-end">
+                          <div className="max-w-[86%] rounded-2xl rounded-br-sm bg-[var(--mv-red)] px-3 py-1.5 text-sm text-white sm:max-w-[80%]">
+                            {turn.text}
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    const { body, sources: inlineSources } = extractSources(turn.text);
+                    const sources = mergeSources(inlineSources, turn.sources || []);
+                    const products = mergeProducts([], turn.products || []);
+                    const hasBody = body.trim() !== "";
+                    const isStreamingTurn = loading && latestAssistantTurn?.id === turn.id;
+
+                    if (!hasBody && sources.length === 0 && products.length === 0) {
+                      return isStreamingTurn ? (
+                        <AgentStreamStatus
+                          key={turn.id}
+                          events={progressEvents}
+                          hasText={streamingTextStarted}
+                          fallback="формулирую ответ"
+                        />
+                      ) : null;
+                    }
+
                     return (
-                      <div key={t.id} className="flex justify-end">
-                        <div className="max-w-[80%] rounded-2xl rounded-br-sm bg-[var(--mv-red)] text-white px-3 py-1.5 text-sm">
-                          {t.text}
+                      <div key={turn.id} className="flex items-start gap-2">
+                        <EmViAvatar className="mt-0.5 h-7 w-7" />
+                        <div className="min-w-0 max-w-[min(100%,760px)] flex-1">
+                          {hasBody && (
+                            <div className="rounded-xl rounded-tl-sm border border-border bg-white/85 px-3 py-2 text-[14px] leading-[1.45] shadow-sm">
+                              <div className="prose prose-sm max-w-none prose-p:my-1 prose-ul:my-1 prose-li:my-0.5 text-foreground">
+                                <ReactMarkdown>{body}</ReactMarkdown>
+                              </div>
+                            </div>
+                          )}
+                          {sources.length > 0 && <SourceCitations sources={sources} />}
+                          {products.length > 0 && <TurnRecommendations products={products} />}
                         </div>
                       </div>
                     );
-                  }
-                  const { body, sources: inlineSources } = extractSources(t.text);
-                  const sources = mergeSources(inlineSources, t.sources || []);
-                  const products = mergeProducts([], t.products || []);
-                  return (
-                    <div key={t.id}>
-                      <div className="prose prose-sm max-w-none prose-p:my-1.5 text-foreground">
-                        <ReactMarkdown>{body}</ReactMarkdown>
-                      </div>
-                      {sources.length > 0 && <SourceCitations sources={sources} />}
-                      {products.length > 0 && <TurnRecommendations products={products} />}
-                    </div>
-                  );
-                })}
-                {loading && (
-                  <AgentStatus
-                    label={
-                      catalogLoading ? "Ищу товары в каталоге М.Видео…" : AGENT_STEPS[agentStep]
-                    }
-                  />
+                  })}
+                  {showDebugPanel && (
+                    <AgentDebugPanel
+                      steps={debugSteps}
+                      selectedProducts={selectedDebugProducts}
+                      className="mt-2"
+                      heading="Как Эм.Ви думала под капотом"
+                      checkedDataLabel="Какие данные проверила"
+                      emptyAssistantLabel="Эм.Ви"
+                    />
+                  )}
+                </div>
+
+                {!isCompactAnswer && (
+                  <div className="flex items-center gap-2 border-t border-border/70 bg-white/80 px-3 py-2 sm:px-4">
+                    <input
+                      value={followUp}
+                      onChange={(e) => setFollowUp(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && void sendFollowUp()}
+                      placeholder="Спросите уточнение…"
+                      className="h-10 flex-1 rounded-full bg-muted px-3 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--mv-red)]/35 sm:h-9"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void sendFollowUp()}
+                      disabled={!followUp.trim() || loading}
+                      className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-[var(--mv-red)] text-white hover:bg-[var(--mv-red-dark)] disabled:opacity-40 sm:h-9 sm:w-9"
+                    >
+                      <Send className="h-4 w-4" />
+                    </button>
+                  </div>
                 )}
-
-                {debugSteps.length > 0 && <AgentDebugPanel steps={debugSteps} />}
-              </div>
-
-              {/* Follow-up input */}
-              <div className="border-t border-[var(--mv-red)]/15 bg-white px-3 py-2 flex items-center gap-2">
-                <input
-                  value={followUp}
-                  onChange={(e) => setFollowUp(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && sendFollowUp()}
-                  placeholder="Уточнить у ИИ…"
-                  className="flex-1 h-9 px-3 rounded-full bg-muted text-sm focus:outline-none focus:ring-2 focus:ring-[var(--mv-red)]/40"
-                />
-                <button
-                  onClick={sendFollowUp}
-                  disabled={!followUp.trim() || loading}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[var(--mv-red)] text-white hover:bg-[var(--mv-red-dark)] disabled:opacity-40"
+              </>
+            ) : (
+              <div className="px-3 py-3 sm:px-4 sm:py-4">
+                <div
+                  className={`relative ${hasExpandableContent ? "max-h-[170px] overflow-hidden" : ""}`}
                 >
-                  <Send className="h-4 w-4" />
-                </button>
+                  {latestAnswer.body.trim() && (
+                    <div className="prose prose-sm max-w-none text-[14px] leading-[1.55] text-foreground prose-p:my-1.5 prose-ul:my-1.5 prose-li:my-0.5">
+                      <ReactMarkdown>{latestAnswer.body}</ReactMarkdown>
+                    </div>
+                  )}
+
+                  {latestSources.length > 0 && <SourceChips sources={latestSources.slice(0, 3)} />}
+
+                  {hasExpandableContent && (
+                    <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-white via-white/90 to-transparent" />
+                  )}
+                </div>
+
+                {hasExpandableContent && (
+                  <button
+                    type="button"
+                    onClick={() => setFullyOpen(true)}
+                    className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-full border border-border bg-white px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:border-[var(--mv-red)]/40 hover:text-[var(--mv-red)]"
+                  >
+                    Показать полностью <ChevronDown className="h-4 w-4" />
+                  </button>
+                )}
               </div>
-            </>
-          )}
-        </section>
+            )}
+          </section>
+        )}
 
         {/* Real search results */}
-        <div className="mb-3 flex items-baseline gap-3">
-          <h2 className="text-base font-semibold">Товары в М.Видео</h2>
-          <span className="text-xs text-muted-foreground">
+        <div className="mb-3 flex flex-col gap-1.5 sm:flex-row sm:items-baseline sm:gap-3">
+          <h2 className="text-lg font-semibold">Товары в М.Видео</h2>
+          <span className="text-xs leading-relaxed text-muted-foreground">
             {catalogLoading && allHits.length === 0
               ? `Ищем реальные товары М.Видео для «${query}»…`
               : `Найдено ${allHits.length} по реальным данным М.Видео для «${query}»`}
@@ -419,10 +578,6 @@ export function SearchResults({
           <div className="font-semibold text-foreground mb-1">Фильтры</div>
           Фильтры появятся после подключения официального API каталога.
         </div>
-        <div className="rounded-xl border border-border bg-white p-4 text-xs text-muted-foreground">
-          <div className="font-semibold text-foreground mb-1">М.Бонусы</div>
-          Войдите, чтобы копить бонусы и получать персональные цены.
-        </div>
       </aside>
     </div>
   );
@@ -434,7 +589,7 @@ function TurnRecommendations({ products }: { products: Product[] }) {
     <div className="mt-3 rounded-xl border border-[var(--mv-red)]/20 bg-white/75 p-2.5">
       <div className="mb-2 flex items-start gap-1.5 text-xs font-semibold text-muted-foreground">
         <ShoppingCart className="mt-0.5 h-3.5 w-3.5 text-[var(--mv-red)]" />
-        <span>Товары, рекомендованные ИИ</span>
+        <span>Что советует Эм.Ви</span>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
         {visibleProducts.map((product) => (
@@ -442,48 +597,6 @@ function TurnRecommendations({ products }: { products: Product[] }) {
         ))}
       </div>
     </div>
-  );
-}
-
-function AgentStatus({ label }: { label: string }) {
-  return (
-    <div className="text-sm text-muted-foreground inline-flex gap-1 items-center">
-      <span className="h-1.5 w-1.5 rounded-full bg-[var(--mv-red)] animate-bounce" />
-      <span className="h-1.5 w-1.5 rounded-full bg-[var(--mv-red)] animate-bounce [animation-delay:0.15s]" />
-      <span className="h-1.5 w-1.5 rounded-full bg-[var(--mv-red)] animate-bounce [animation-delay:0.3s]" />
-      <span className="ml-2">{label}</span>
-    </div>
-  );
-}
-
-function AgentDebugPanel({ steps }: { steps: AgentDebugStep[] }) {
-  return (
-    <details className="rounded-xl border border-slate-200 bg-slate-50/80 p-3 text-xs text-slate-700">
-      <summary className="cursor-pointer select-none font-semibold text-slate-900">
-        Debug агента · {steps.length} событий
-      </summary>
-      <div className="mt-3 space-y-2">
-        {steps.map((step, index) => (
-          <div
-            key={`${step.step}-${index}`}
-            className="rounded-lg border border-slate-200 bg-white p-2"
-          >
-            <div className="flex items-center justify-between gap-2">
-              <span className="font-medium text-slate-900">{step.title}</span>
-              <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] uppercase text-slate-500">
-                {step.type} · {step.step + 1}
-              </span>
-            </div>
-            {step.detail && <div className="mt-1 text-slate-600">{step.detail}</div>}
-            {(step.args !== undefined || step.result !== undefined) && (
-              <pre className="mt-2 max-h-44 overflow-auto rounded bg-slate-950 p-2 text-[11px] leading-relaxed text-slate-100">
-                {JSON.stringify(step.args ?? step.result, null, 2)}
-              </pre>
-            )}
-          </div>
-        ))}
-      </div>
-    </details>
   );
 }
 

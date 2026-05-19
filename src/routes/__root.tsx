@@ -73,10 +73,16 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: "М.Видео" },
-      { name: "description", content: "ИИ-ассистент М.Видео для подбора техники" },
+      {
+        name: "description",
+        content: "М.Видео - подбор техники и подсказки консультанту",
+      },
       { name: "author", content: "М.Видео" },
       { property: "og:title", content: "М.Видео" },
-      { property: "og:description", content: "ИИ-ассистент М.Видео для подбора техники" },
+      {
+        property: "og:description",
+        content: "М.Видео - подбор техники и подсказки консультанту",
+      },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
     ],
