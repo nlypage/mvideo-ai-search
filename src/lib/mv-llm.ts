@@ -59,12 +59,13 @@ export type RuntimeAiConfig = {
 };
 
 const OFF_TOPIC_RE =
-  /\b(?:код|python|javascript|sql|реферат|сочинение|погода|новости|политик|медицина|юрист|астролог|анекдот)\b/i;
+  /(?:NSFW|эротик|порно|наркотик|оружи[ея]|взрывчат|фишинг|взлом|malware|вирус)/i;
+
+const PROMPT_INJECTION_RE =
+  /(?:ignore|forget|disregard|override)\s+(?:previous|all|above|system|developer).*?(?:instructions|prompts?|rules?)|(?:system\s*prompt|developer\s*message|hidden\s+instructions?|jailbreak|DAN|developer\s*mode)|(?:выйди\s+из\s+роли|теперь\s+ты\s+обязан|игнорируй\s+(?:инструкции|правила|предыдущ)|раскрой|покажи|выведи|напечатай)\s+(?:системн\w+\s+промпт|инструкции|секрет|ключ|токен)|<\/?(?:system|developer|assistant|tool)>/i;
 
 export function isOffTopic(text: string): boolean {
-  return (
-    OFF_TOPIC_RE.test(text) && !/ноутбук|компьютер|техника|телевизор|смартфон|м\.видео/i.test(text)
-  );
+  return PROMPT_INJECTION_RE.test(text) || OFF_TOPIC_RE.test(text);
 }
 
 export function crossSellFor(_productId: string): { items: Product[]; rationale: string } {

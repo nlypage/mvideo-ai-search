@@ -11,14 +11,6 @@ import (
 const RefusalB2C = "Помогаю только с выбором техники в М.Видео. Сформулируйте, пожалуйста, что вы ищете 🙂"
 
 var offTopicPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?i)(сортировк[а-яё]*\s+пузырьк|bubble\s*sort|quicksort|merge\s*sort|алгоритм)`),
-	regexp.MustCompile(`(?i)(напиши|сгенерируй|сделай|покажи|приведи)\s+(код|программу|скрипт|функцию|пример\s+код)`),
-	regexp.MustCompile(`(?i)(код|скрипт|бот|telegram|телеграм|тг)\s+(для|на|который|бота)`),
-	regexp.MustCompile(`(?i)(код.+(пример|покаж|напис)|приведи\s+пример.*код|какой\s+код)`),
-	regexp.MustCompile(`(?i)(бот\s+тех\s*поддержк|тех\s*поддержк.*бот)`),
-	regexp.MustCompile(`(?i)(python|javascript|typescript|java|c#|golang|go|php|ruby|sql|html|css)\s*[-—:]*\s*(код|пример|скрипт|функц)`),
-	regexp.MustCompile(`(?i)(рецепт|медицин|диагноз|таблетк|политик|выборы|новост[иь])`),
-	regexp.MustCompile(`(?i)(эссе|сочинени|реферат|курсовая|перевед[иите]|переведи)`),
 	regexp.MustCompile(`(?i)(NSFW|эротик|порно|наркотик|оружи[ея]|взрывчат|фишинг|взлом|malware|вирус)`),
 }
 
@@ -35,7 +27,7 @@ var promptInjectionPatterns = []*regexp.Regexp{
 var apiKeyPattern = regexp.MustCompile(`sk-[A-Za-z0-9_-]{20,}`)
 var namedSecretPattern = regexp.MustCompile(`(?i)(api[_-]?key|token|secret)\s*[:=]\s*[A-Za-z0-9._-]{12,}`)
 
-// IsOffTopic reports whether text is outside the shopping-assistant domain.
+// IsOffTopic reports whether text matches critical categories that should never reach tools.
 func IsOffTopic(text string) bool {
 	return matchesAny(offTopicPatterns, text)
 }
@@ -43,6 +35,11 @@ func IsOffTopic(text string) bool {
 // IsPromptInjection reports whether text appears to attack the prompt boundary.
 func IsPromptInjection(text string) bool {
 	return matchesAny(promptInjectionPatterns, text)
+}
+
+// ShouldBlockCritical reports whether text should be refused without an LLM guard.
+func ShouldBlockCritical(text string) bool {
+	return IsPromptInjection(text) || IsOffTopic(text)
 }
 
 // SanitizeUserText removes control characters, collapses whitespace, trims, and truncates by rune count.

@@ -248,7 +248,7 @@ func (h *apiHandler) handleCatalogSearch(w http.ResponseWriter, r *http.Request,
 		writeJSON(w, http.StatusBadRequest, map[string]any{"products": []any{}, "error": "Empty query"})
 		return
 	}
-	if security.IsPromptInjection(req.Query) || security.IsOffTopic(req.Query) {
+	if security.ShouldBlockCritical(req.Query) {
 		writeJSON(w, http.StatusOK, map[string]any{"products": []any{}})
 		return
 	}

@@ -25,6 +25,19 @@ type ChatStreamCompleter interface {
 	CompleteStream(ctx context.Context, messages []openai.Message, toolSpecs []openai.Tool, toolChoice any, maxTokens int, temperature float64, onDelta func(openai.StreamDelta) error) (openai.Message, error)
 }
 
+const b2cGuardThreshold = 0.65
+
+type b2cGuardDecision struct {
+	RejectionScore float64 `json:"rejection_score"`
+	Reason         string  `json:"reason"`
+	Label          string  `json:"label"`
+	Raw            string  `json:"-"`
+}
+
+func (d b2cGuardDecision) shouldReject() bool {
+	return d.RejectionScore >= b2cGuardThreshold || strings.EqualFold(d.Label, "reject")
+}
+
 // UpstreamOptions controls model budget knobs for the upstream agent.
 type UpstreamOptions struct {
 	MaxTokensB2C   int
@@ -100,11 +113,24 @@ func (a *UpstreamAgent) chat(ctx context.Context, messages []chat.Message, mode 
 		return finishResult(*refusal, a.debug, nil), nil
 	}
 
+	debug := []DebugStep{}
+	if mode == chat.ModeB2C {
+		decision, err := a.checkB2CGuard(ctx, lastUserText(messages))
+		if err != nil {
+			return Result{}, err
+		}
+		if a.debug {
+			debug = append(debug, DebugStep{Step: -1, Type: "decision", Title: "Предпроверка запроса", Args: map[string]any{"score": decision.RejectionScore, "label": decision.Label, "reason": decision.Reason}})
+		}
+		if decision.shouldReject() {
+			return finishResult(Result{Text: security.RefusalB2C}, a.debug, debug), nil
+		}
+	}
+
 	convo := []openai.Message{{Role: "system", Content: systemPrompt(mode)}}
 	for _, message := range messages {
 		convo = append(convo, openai.Message{Role: message.Role, Content: message.Content})
 	}
-	debug := []DebugStep{}
 	searchProducts := []catalog.Product{}
 	recommendedProducts := []catalog.Product{}
 	blogArticles := []catalog.BlogArticle{}
@@ -296,6 +322,41 @@ func (a *UpstreamAgent) runTool(ctx context.Context, name string, args tools.Arg
 
 func forceToolChoice(name string) map[string]any {
 	return map[string]any{"type": "function", "function": map[string]string{"name": name}}
+}
+
+func (a *UpstreamAgent) checkB2CGuard(ctx context.Context, userText string) (b2cGuardDecision, error) {
+	msg, err := a.client.Complete(ctx, []openai.Message{
+		{Role: "system", Content: b2cGuardPrompt},
+		{Role: "user", Content: security.SanitizeUserText(userText, 700)},
+	}, nil, "", 120, 0)
+	if err != nil {
+		return b2cGuardDecision{}, err
+	}
+	return parseB2CGuardDecision(msg.Content), nil
+}
+
+func parseB2CGuardDecision(content string) b2cGuardDecision {
+	decision := b2cGuardDecision{RejectionScore: 1, Label: "reject", Reason: "invalid guard response", Raw: content}
+	raw := strings.TrimSpace(content)
+	start := strings.Index(raw, "{")
+	end := strings.LastIndex(raw, "}")
+	if start >= 0 && end > start {
+		raw = raw[start : end+1]
+	}
+	if err := json.Unmarshal([]byte(raw), &decision); err != nil {
+		decision.Raw = content
+		return decision
+	}
+	if decision.RejectionScore < 0 {
+		decision.RejectionScore = 0
+	}
+	if decision.RejectionScore > 1 {
+		decision.RejectionScore = 1
+	}
+	decision.Label = strings.ToLower(strings.TrimSpace(decision.Label))
+	decision.Reason = security.SanitizeUserText(decision.Reason, 160)
+	decision.Raw = content
+	return decision
 }
 
 func (a *UpstreamAgent) finalNoToolsAnswer(ctx context.Context, convo []openai.Message, messages []chat.Message, mode chat.Mode, searchProducts []catalog.Product, recommendedProducts []catalog.Product, citedSources []catalog.BlogSource, emit func(StreamEvent) error) Result {

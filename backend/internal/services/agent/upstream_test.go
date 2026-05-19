@@ -18,6 +18,9 @@ type fakeCompleter struct {
 }
 
 func (f *fakeCompleter) Complete(ctx context.Context, messages []openai.Message, toolSpecs []openai.Tool, toolChoice any, maxTokens int, temperature float64) (openai.Message, error) {
+	if isGuardCompletion(messages) {
+		return openai.Message{Role: "assistant", Content: `{"rejection_score":0.05,"reason":"товарный запрос","label":"allow"}`}, nil
+	}
 	f.calls++
 	if f.calls == 1 {
 		call := openai.ToolCall{ID: "call-1", Type: "function"}
@@ -54,6 +57,57 @@ func TestUpstreamAgentToolLoop(t *testing.T) {
 	}
 }
 
+type guardRejectCompleter struct {
+	mainCalls int
+}
+
+func (g *guardRejectCompleter) Complete(ctx context.Context, messages []openai.Message, toolSpecs []openai.Tool, toolChoice any, maxTokens int, temperature float64) (openai.Message, error) {
+	if isGuardCompletion(messages) {
+		return openai.Message{Role: "assistant", Content: `{"rejection_score":0.96,"reason":"алгоритмы вне домена М.Видео","label":"reject"}`}, nil
+	}
+	g.mainCalls++
+	return openai.Message{Role: "assistant", Content: "should not be called"}, nil
+}
+
+func TestUpstreamAgentRefusesOffDomainB2CBeforeMainModel(t *testing.T) {
+	completer := &guardRejectCompleter{}
+	agent := NewUpstream(completer, tools.New(fakeUpstreamBackend{}), true)
+	result, err := agent.Chat(context.Background(), []chat.Message{{Role: "user", Content: "как написать бинайрный поиск"}}, chat.ModeB2C)
+	if err != nil {
+		t.Fatalf("Chat() error = %v", err)
+	}
+	if result.Text == "" || len(result.Products) != 0 || completer.mainCalls != 0 {
+		t.Fatalf("unexpected result/calls: %+v calls=%d", result, completer.mainCalls)
+	}
+}
+
+func TestUpstreamAgentAllowsShortCatalogQueryThroughGuard(t *testing.T) {
+	completer := &fakeCompleter{}
+	agent := NewUpstream(completer, tools.New(fakeUpstreamBackend{}), true)
+	result, err := agent.Chat(context.Background(), []chat.Message{{Role: "user", Content: "блинница"}}, chat.ModeB2C)
+	if err != nil {
+		t.Fatalf("Chat() error = %v", err)
+	}
+	if result.Text == "" || completer.calls == 0 {
+		t.Fatalf("expected main model call for product query, got result=%+v calls=%d", result, completer.calls)
+	}
+}
+
+func TestParseB2CGuardDecision(t *testing.T) {
+	allow := parseB2CGuardDecision("```json\n{\"rejection_score\":0.12,\"reason\":\"товар\",\"label\":\"allow\"}\n```")
+	if allow.shouldReject() || allow.RejectionScore != 0.12 || allow.Label != "allow" {
+		t.Fatalf("unexpected allow decision: %+v", allow)
+	}
+	reject := parseB2CGuardDecision(`{"rejection_score":0.91,"reason":"код","label":"reject"}`)
+	if !reject.shouldReject() {
+		t.Fatalf("expected reject decision: %+v", reject)
+	}
+	invalid := parseB2CGuardDecision("not json")
+	if !invalid.shouldReject() {
+		t.Fatalf("invalid guard response must fail closed: %+v", invalid)
+	}
+}
+
 type sequenceCompleter struct {
 	calls        int
 	seq          []openai.Message
@@ -63,6 +117,9 @@ type sequenceCompleter struct {
 }
 
 func (s *sequenceCompleter) Complete(ctx context.Context, messages []openai.Message, toolSpecs []openai.Tool, toolChoice any, maxTokens int, temperature float64) (openai.Message, error) {
+	if isGuardCompletion(messages) {
+		return openai.Message{Role: "assistant", Content: `{"rejection_score":0.05,"reason":"товарный запрос","label":"allow"}`}, nil
+	}
 	s.calls++
 	s.toolChoices = append(s.toolChoices, toolChoice)
 	s.maxTokens = append(s.maxTokens, maxTokens)
@@ -106,6 +163,10 @@ func (b *recordingBackend) SearchReviews(ctx context.Context, productID string, 
 
 func (b *recordingBackend) SearchBlog(ctx context.Context, query string) ([]catalog.BlogArticle, error) {
 	return []catalog.BlogArticle{{Title: "Как выбрать OLED", URL: "https://www.mvideo.ru/blog/oled", Snippet: "snippet", Content: "content"}}, nil
+}
+
+func isGuardCompletion(messages []openai.Message) bool {
+	return len(messages) > 0 && messages[0].Content == b2cGuardPrompt
 }
 
 func toolCall(name string, args string) openai.Message {

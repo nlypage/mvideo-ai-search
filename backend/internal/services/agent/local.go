@@ -47,7 +47,7 @@ func NewLocal(registry *tools.Registry, debug bool) *LocalAgent {
 // Chat answers using deterministic catalog/blog tools without an upstream LLM.
 func (a *LocalAgent) Chat(ctx context.Context, messages []chat.Message, mode chat.Mode) (Result, error) {
 	last := lastUserText(messages)
-	if mode == chat.ModeB2C && security.IsOffTopic(last) {
+	if mode == chat.ModeB2C && security.ShouldBlockCritical(last) {
 		return finishResult(Result{Text: security.RefusalB2C}, a.debug, nil), nil
 	}
 	if mode == chat.ModeB2E && (security.IsPromptInjection(last) || security.IsOffTopic(last)) {
