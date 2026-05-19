@@ -5,6 +5,7 @@ type AgentStreamStatusProps = {
   events: AgentStreamEvent[];
   fallback?: string;
   hasText?: boolean;
+  tone?: "b2c" | "b2e";
 };
 
 function normalizeStatus(label: string): string {
@@ -15,13 +16,29 @@ function normalizeStatus(label: string): string {
     .replace(/\.\.\.$/, "…");
 }
 
-function statusLabel(events: AgentStreamEvent[], hasText: boolean, fallback?: string): string {
+function b2eToolLabel(event: AgentStreamEvent): string | null {
+  if (event.type === "tool_call_done") return "формулирую подсказку";
+  if (event.name === "search_catalog") return "смотрю остатки";
+  if (event.name === "search_blog") return "ищу аргументы";
+  if (event.name === "recommend_products") return "проверяю аксессуары";
+  return null;
+}
+
+function statusLabel(
+  events: AgentStreamEvent[],
+  hasText: boolean,
+  fallback?: string,
+  tone: "b2c" | "b2e" = "b2c",
+): string {
   const toolEvents = events.filter(
     (event) => event.type === "tool_call_start" || event.type === "tool_call_done",
   );
   const last = toolEvents.at(-1);
   if (hasText) {
-    return "отвечаю…";
+    return tone === "b2e" ? "пишу подсказку" : "отвечаю…";
+  }
+  if (tone === "b2e" && last) {
+    return b2eToolLabel(last) || normalizeStatus(fallback || "формулирую подсказку");
   }
   if (last?.type === "tool_call_start") {
     return normalizeStatus(last.hint || "смотрю каталог М.Видео");
@@ -32,8 +49,13 @@ function statusLabel(events: AgentStreamEvent[], hasText: boolean, fallback?: st
   return normalizeStatus(fallback || "смотрю каталог М.Видео");
 }
 
-export function AgentStreamStatus({ events, fallback, hasText = false }: AgentStreamStatusProps) {
-  const label = statusLabel(events, hasText, fallback);
+export function AgentStreamStatus({
+  events,
+  fallback,
+  hasText = false,
+  tone = "b2c",
+}: AgentStreamStatusProps) {
+  const label = statusLabel(events, hasText, fallback, tone);
 
   return (
     <div aria-live="polite" className="mb-3 flex items-start gap-2">

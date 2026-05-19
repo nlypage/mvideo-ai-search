@@ -61,7 +61,7 @@ export function ProductCard({
             </span>
             {showMargin && product.margin != null && (
               <span className="inline-flex items-center gap-1 rounded bg-amber-50 px-1.5 py-0.5 text-amber-700">
-                Маржа {product.margin}%
+                Твой бонус +{product.margin}%
               </span>
             )}
           </div>
