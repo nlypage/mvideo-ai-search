@@ -27,19 +27,34 @@ func (a *UpstreamAgent) Stream(ctx context.Context, messages []chat.Message, mod
 	return a.chat(ctx, messages, mode, emit)
 }
 
-func toolProgressHint(name string, _ tools.Args) string {
+func toolProgressHint(name string, args tools.Args) string {
 	switch name {
 	case "search_catalog":
-		return "Ищет в каталоге..."
+		if args.Query != "" {
+			return "Ищет в каталоге: " + args.Query
+		}
+		return "Ищет в каталоге"
 	case "search_reviews":
-		return "Читает отзывы..."
+		if args.Title != "" {
+			return "Читает отзывы: " + args.Title
+		}
+		return "Читает отзывы"
 	case "search_blog":
-		return "Ищет гайд в блоге..."
+		if args.Query != "" {
+			return "Ищет аргументы: " + args.Query
+		}
+		return "Ищет аргументы в блоге"
 	case "cite_blog_source":
-		return "Проверяет источник..."
+		if args.Title != "" {
+			return "Проверяет источник: " + args.Title
+		}
+		return "Проверяет источник"
 	case "recommend_products":
-		return "Подбирает карточки..."
+		if len(args.ProductIDs) > 0 {
+			return "Проверяет допродажи: " + args.ProductIDs[0]
+		}
+		return "Проверяет допродажи"
 	default:
-		return "Думает..."
+		return "Думает"
 	}
 }
