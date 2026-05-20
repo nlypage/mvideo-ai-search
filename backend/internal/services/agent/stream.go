@@ -31,14 +31,9 @@ func toolProgressHint(name string, args tools.Args) string {
 	switch name {
 	case "search_catalog":
 		if args.Query != "" {
-			return "Ищет в каталоге: " + args.Query
+			return "Ищет в каталоге и отзывах: " + args.Query
 		}
-		return "Ищет в каталоге"
-	case "search_reviews":
-		if args.Title != "" {
-			return "Читает отзывы: " + args.Title
-		}
-		return "Читает отзывы"
+		return "Ищет в каталоге и отзывах"
 	case "search_blog":
 		if args.Query != "" {
 			return "Ищет аргументы: " + args.Query

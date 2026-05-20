@@ -442,7 +442,6 @@ func parseToolArgs(raw string) tools.Args {
 	var args tools.Args
 	values := parseToolArgMap(raw)
 	args.Query = stringValue(values["query"])
-	args.ProductID = stringValue(values["productId"])
 	args.Title = stringValue(values["title"])
 	args.URL = stringValue(values["url"])
 	args.ProductIDs = stringSlice(values["productIds"])
@@ -557,8 +556,7 @@ func buildToolSpecs() []openai.Tool {
 	}
 	arrayOfStrings := map[string]any{"type": "array", "items": map[string]any{"type": "string"}}
 	return []openai.Tool{
-		{Type: "function", Function: openai.FunctionSpec{Name: "search_catalog", Description: "Поиск товаров в публичном каталоге М.Видео. Для широких запросов передавай короткий тип товара/категорию, не полный вопрос.", Parameters: object(map[string]any{"query": map[string]any{"type": "string"}, "requiredTerms": arrayOfStrings, "excludedTerms": arrayOfStrings, "minPrice": map[string]any{"type": "number"}, "maxPrice": map[string]any{"type": "number"}, "offset": map[string]any{"type": "number"}, "limit": map[string]any{"type": "number"}}, []string{"query"})}},
-		{Type: "function", Function: openai.FunctionSpec{Name: "search_reviews", Description: "Получает реальные отзывы покупателей М.Видео по конкретному productId", Parameters: object(map[string]any{"productId": map[string]any{"type": "string"}, "query": map[string]any{"type": "string"}}, []string{"productId"})}},
+		{Type: "function", Function: openai.FunctionSpec{Name: "search_catalog", Description: "Поиск товаров в публичном каталоге М.Видео с автоматической загрузкой выжимки отзывов покупателей для верхней части выдачи. Давай модели широкий выбор: обычно limit 36, не ставь меньше 24 без причины. Для широких запросов передавай короткий тип товара/категорию, не полный вопрос.", Parameters: object(map[string]any{"query": map[string]any{"type": "string"}, "requiredTerms": arrayOfStrings, "excludedTerms": arrayOfStrings, "minPrice": map[string]any{"type": "number"}, "maxPrice": map[string]any{"type": "number"}, "offset": map[string]any{"type": "number"}, "limit": map[string]any{"type": "number"}}, []string{"query"})}},
 		{Type: "function", Function: openai.FunctionSpec{Name: "search_blog", Description: "Поиск статей и обзоров в блоге М.Видео для критериев выбора и технических объяснений", Parameters: object(map[string]any{"query": map[string]any{"type": "string"}}, []string{"query"})}},
 		{Type: "function", Function: openai.FunctionSpec{Name: "cite_blog_source", Description: "Выбирает прочитанную статью блога М.Видео как структурный источник финального ответа", Parameters: object(map[string]any{"title": map[string]any{"type": "string"}, "url": map[string]any{"type": "string"}}, []string{"title", "url"})}},
 		{Type: "function", Function: openai.FunctionSpec{Name: "recommend_products", Description: "Фиксирует выбранные товары для блока карточек рекомендаций. Передавай только productIds из результатов search_catalog.", Parameters: object(map[string]any{"productIds": arrayOfStrings}, []string{"productIds"})}},

@@ -15,6 +15,16 @@ export type AgentDebugStep = {
   result?: unknown;
 };
 
+export type ReviewSummary = {
+  productId: string;
+  totalNumber: number;
+  recommendPercent: number;
+  totalRating: number;
+  snippets?: string[];
+  benefits?: string[];
+  drawbacks?: string[];
+};
+
 export type Product = {
   id: string;
   title: string;
@@ -27,6 +37,7 @@ export type Product = {
   stock: { warehouse: number; store: number; storeName: string };
   margin?: number;
   category: string;
+  reviewSummary?: ReviewSummary;
 };
 
 export type SourceCitation = {

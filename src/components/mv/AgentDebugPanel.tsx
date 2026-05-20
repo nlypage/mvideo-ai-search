@@ -10,8 +10,7 @@ import {
 import type { AgentDebugStep, Product } from "@/lib/mv-llm";
 
 const TOOL_LABELS: Record<string, string> = {
-  search_catalog: "Поиск в каталоге",
-  search_reviews: "Чтение отзывов",
+  search_catalog: "Поиск в каталоге и отзывах",
   search_blog: "Поиск в блоге",
   cite_blog_source: "Проверка источника",
   recommend_products: "Выбор карточек",
@@ -36,9 +35,7 @@ type AgentDebugPanelProps = {
 function toolNameFromStep(step: AgentDebugStep): string | null {
   const candidates = [step.title, step.detail ?? ""];
   for (const text of candidates) {
-    const match = text.match(
-      /(search_catalog|search_reviews|search_blog|cite_blog_source|recommend_products)/,
-    );
+    const match = text.match(/(search_catalog|search_blog|cite_blog_source|recommend_products)/);
     if (match) return match[1];
   }
   return null;

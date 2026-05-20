@@ -38,7 +38,16 @@ func (fakeUpstreamBackend) Search(ctx context.Context, req catalog.SearchRequest
 }
 
 func (fakeUpstreamBackend) SearchReviews(ctx context.Context, productID string, query string) ([]catalog.ReviewSummary, error) {
-	return nil, nil
+	// Возвращаем тестовые отзывы для обогащения товаров
+	return []catalog.ReviewSummary{{
+		ProductID:        productID,
+		TotalRating:      4.5,
+		TotalNumber:      42,
+		RecommendPercent: 85,
+		Snippets:         []string{"Отличный товар", "Рекомендую"},
+		Benefits:         []string{"Качество", "Цена"},
+		Drawbacks:        []string{"Доставка"},
+	}}, nil
 }
 
 func (fakeUpstreamBackend) SearchBlog(ctx context.Context, query string) ([]catalog.BlogArticle, error) {

@@ -41,12 +41,8 @@ func TestLiveToolsSmoke(t *testing.T) {
 	}
 	t.Logf("search_blog ok: title=%q content=%d", blogResult.Article.Title, len(blogResult.Article.Content))
 
-	if len(catalogResult.Products) > 0 {
-		reviews, err := client.SearchReviews(ctx, catalogResult.Products[0].ID, "")
-		if err != nil {
-			t.Fatalf("search_reviews returned Go error: %v", err)
-		}
-		t.Logf("search_reviews ok/non-fatal: reviews=%d productId=%s", len(reviews), catalogResult.Products[0].ID)
+	if summary := catalogResult.Products[0].ReviewSummary; summary != nil {
+		t.Logf("catalog review summary ok/non-fatal: rating=%.1f productId=%s", summary.TotalRating, catalogResult.Products[0].ID)
 	}
 }
 

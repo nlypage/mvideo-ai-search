@@ -8,6 +8,8 @@ import (
 	"github.com/nlypage/mvideo-ai-search/backend/internal/domain/security"
 )
 
+const catalogReviewSummaryLimit = 12
+
 // CatalogBackend is the tool registry dependency implemented by the M.Video client/service layer.
 type CatalogBackend interface {
 	Search(ctx context.Context, req catalog.SearchRequest) (catalog.SearchResult, error)
@@ -18,7 +20,6 @@ type CatalogBackend interface {
 // Args contains sanitized tool input values.
 type Args struct {
 	Query         string
-	ProductID     string
 	ProductIDs    []string
 	RequiredTerms []string
 	ExcludedTerms []string
@@ -32,18 +33,17 @@ type Args struct {
 
 // Result is the JSON-serializable tool result shape used by the agent.
 type Result struct {
-	Products []catalog.Product       `json:"products,omitempty"`
-	Reviews  []catalog.ReviewSummary `json:"reviews,omitempty"`
-	Article  *catalog.BlogArticle    `json:"article,omitempty"`
-	Articles []catalog.BlogArticle   `json:"articles,omitempty"`
-	Title    string                  `json:"title,omitempty"`
-	URL      string                  `json:"url,omitempty"`
-	Snippet  string                  `json:"snippet,omitempty"`
-	Citation *catalog.BlogSource     `json:"citation,omitempty"`
-	Source   string                  `json:"source,omitempty"`
-	Role     string                  `json:"role,omitempty"`
-	Page     *catalog.Page           `json:"page,omitempty"`
-	Error    string                  `json:"error,omitempty"`
+	Products []catalog.Product     `json:"products,omitempty"`
+	Article  *catalog.BlogArticle  `json:"article,omitempty"`
+	Articles []catalog.BlogArticle `json:"articles,omitempty"`
+	Title    string                `json:"title,omitempty"`
+	URL      string                `json:"url,omitempty"`
+	Snippet  string                `json:"snippet,omitempty"`
+	Citation *catalog.BlogSource   `json:"citation,omitempty"`
+	Source   string                `json:"source,omitempty"`
+	Role     string                `json:"role,omitempty"`
+	Page     *catalog.Page         `json:"page,omitempty"`
+	Error    string                `json:"error,omitempty"`
 }
 
 // Registry runs allowlisted tools.
@@ -65,8 +65,6 @@ func (r *Registry) Run(ctx context.Context, name string, args Args) (Result, err
 	switch name {
 	case "search_catalog":
 		return r.searchCatalog(ctx, sanitized)
-	case "search_reviews":
-		return r.searchReviews(ctx, sanitized)
 	case "search_blog":
 		return r.searchBlog(ctx, sanitized)
 	case "cite_blog_source":
@@ -90,18 +88,64 @@ func (r *Registry) searchCatalog(ctx context.Context, args Args) (Result, error)
 	if len(result.Products) == 0 {
 		return Result{Error: "Не удалось получить товары из реального публичного каталога М.Видео: BFF каталога не вернул данные или заблокировал запрос."}, nil
 	}
-	return Result{Products: result.Products, Source: "live", Role: "catalog", Page: result.Page}, nil
+
+	// Автоматически загружаем краткие отзывы для верхней части выдачи.
+	productsWithReviews := r.enrichProductsWithReviews(ctx, result.Products)
+
+	return Result{Products: productsWithReviews, Source: "live", Role: "catalog", Page: result.Page}, nil
 }
 
-func (r *Registry) searchReviews(ctx context.Context, args Args) (Result, error) {
-	reviews, err := r.backend.SearchReviews(ctx, args.ProductID, args.Query)
-	if err != nil {
-		return Result{Error: "Не удалось получить релевантные отзывы покупателей М.Видео."}, nil
+// enrichProductsWithReviews добавляет краткие отзывы к товарам.
+func (r *Registry) enrichProductsWithReviews(ctx context.Context, products []catalog.Product) []catalog.Product {
+	if len(products) == 0 {
+		return products
 	}
-	if len(reviews) == 0 {
-		return Result{Error: "Не удалось получить релевантные отзывы покупателей М.Видео."}, nil
+
+	// Ограничиваем количество товаров для загрузки отзывов, чтобы широкий поиск не превращался в десятки внешних запросов.
+	limit := min(len(products), catalogReviewSummaryLimit)
+	productIDs := make([]string, limit)
+	for i := 0; i < limit; i++ {
+		productIDs[i] = products[i].ID
 	}
-	return Result{Reviews: reviews, Source: "live"}, nil
+
+	// Загружаем отзывы параллельно
+	type reviewResult struct {
+		productID string
+		summary   catalog.ReviewSummary
+		ok        bool
+	}
+
+	resultCh := make(chan reviewResult, len(productIDs))
+	for _, productID := range productIDs {
+		go func(id string) {
+			reviews, err := r.backend.SearchReviews(ctx, id, "")
+			if err != nil || len(reviews) == 0 {
+				resultCh <- reviewResult{productID: id, ok: false}
+				return
+			}
+			resultCh <- reviewResult{productID: id, summary: reviews[0], ok: true}
+		}(productID)
+	}
+
+	// Собираем результаты
+	reviewsByID := make(map[string]catalog.ReviewSummary)
+	for range productIDs {
+		result := <-resultCh
+		if result.ok {
+			reviewsByID[result.productID] = result.summary
+		}
+	}
+
+	// Обогащаем товары отзывами
+	enrichedProducts := make([]catalog.Product, len(products))
+	for i, product := range products {
+		enrichedProducts[i] = product
+		if summary, exists := reviewsByID[product.ID]; exists {
+			enrichedProducts[i].ReviewSummary = &summary
+		}
+	}
+
+	return enrichedProducts
 }
 
 func (r *Registry) searchBlog(ctx context.Context, args Args) (Result, error) {
@@ -125,7 +169,6 @@ func citeBlogSource(args Args) Result {
 
 func sanitizeArgs(args Args) Args {
 	args.Query = security.SanitizeUserText(args.Query, 240)
-	args.ProductID = security.SanitizeUserText(args.ProductID, 40)
 	args.Title = security.SanitizeUserText(args.Title, 180)
 	args.URL = security.SanitizeUserText(args.URL, 400)
 	args.ProductIDs = sanitizeStrings(args.ProductIDs, 40, 8)

@@ -24,6 +24,11 @@ type DebugStep struct {
 	Result any    `json:"result,omitempty"`
 }
 
+const (
+	catalogCandidateLimit    = 36
+	catalogDebugProductLimit = 24
+)
+
 // Result is the /api/llm response body.
 type Result struct {
 	Text     string               `json:"text"`
@@ -168,11 +173,22 @@ func finishResult(result Result, debugEnabled bool, debug []DebugStep) Result {
 
 func compactToolResult(result tools.Result) any {
 	if len(result.Products) > 0 {
-		items := make([]map[string]any, 0, min(len(result.Products), 8))
-		for _, product := range firstProducts(result.Products, 8) {
-			items = append(items, map[string]any{"id": product.ID, "title": product.Title, "price": product.Price, "rating": product.Rating, "reviews": product.Reviews})
+		items := make([]map[string]any, 0, min(len(result.Products), catalogDebugProductLimit))
+		for _, product := range firstProducts(result.Products, catalogDebugProductLimit) {
+			item := map[string]any{"id": product.ID, "title": product.Title, "price": product.Price, "rating": product.Rating, "reviews": product.Reviews}
+			if product.ReviewSummary != nil {
+				item["reviewSummary"] = map[string]any{
+					"totalRating":      product.ReviewSummary.TotalRating,
+					"totalNumber":      product.ReviewSummary.TotalNumber,
+					"recommendPercent": product.ReviewSummary.RecommendPercent,
+					"snippets":         product.ReviewSummary.Snippets,
+					"benefits":         product.ReviewSummary.Benefits,
+					"drawbacks":        product.ReviewSummary.Drawbacks,
+				}
+			}
+			items = append(items, item)
 		}
-		return map[string]any{"source": result.Source, "role": result.Role, "page": result.Page, "count": len(result.Products), "products": items}
+		return map[string]any{"source": result.Source, "role": result.Role, "page": result.Page, "count": len(result.Products), "shown": len(items), "products": items}
 	}
 	if result.Article != nil || len(result.Articles) > 0 {
 		preview := ""
@@ -180,9 +196,6 @@ func compactToolResult(result tools.Result) any {
 			preview = security.SanitizeUserText(firstNonEmpty(result.Article.Content, result.Article.Snippet), 300)
 		}
 		return map[string]any{"source": result.Source, "title": result.Title, "url": result.URL, "articleRead": result.Article != nil && result.Article.Content != "", "contentPreview": preview, "articles": len(result.Articles), "error": result.Error}
-	}
-	if len(result.Reviews) > 0 {
-		return map[string]any{"source": result.Source, "count": len(result.Reviews)}
 	}
 	return map[string]any{"citation": result.Citation, "error": result.Error, "source": result.Source}
 }
@@ -257,11 +270,22 @@ func normalizeCatalogArgs(args tools.Args, messages []chat.Message, cursor int) 
 	last := lastUserText(messages)
 	query := firstNonEmpty(args.Query, last)
 	if !isBroadSelectionRequest(query) && !isBroadSelectionRequest(last) {
+		changed := false
 		if args.Query == "" {
 			args.Query = query
-			return args, true
+			changed = true
 		}
-		return args, false
+		if args.Limit == nil || *args.Limit < catalogCandidateLimit {
+			limit := catalogCandidateLimit
+			args.Limit = &limit
+			changed = true
+		}
+		if args.Offset == nil {
+			offset := 0
+			args.Offset = &offset
+			changed = true
+		}
+		return args, changed
 	}
 	categories := deriveCatalogQueries(firstNonEmpty(last, query))
 	category := categories[cursor%len(categories)]
@@ -270,8 +294,8 @@ func normalizeCatalogArgs(args tools.Args, messages []chat.Message, cursor int) 
 	if args.MaxPrice == nil {
 		args.MaxPrice = inferMaxPrice(firstNonEmpty(last, query))
 	}
-	if args.Limit == nil {
-		limit := 12
+	if args.Limit == nil || *args.Limit < catalogCandidateLimit {
+		limit := catalogCandidateLimit
 		args.Limit = &limit
 	}
 	if args.Offset == nil {

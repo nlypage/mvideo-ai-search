@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	catalog "github.com/nlypage/mvideo-ai-search/backend/internal/domain/catalog"
@@ -46,6 +45,13 @@ func TestRunSearchCatalog(t *testing.T) {
 	if len(result.Products) != 1 || result.Source != "live" || result.Role != "catalog" {
 		t.Fatalf("unexpected result: %+v", result)
 	}
+	// Проверяем, что отзывы автоматически добавлены
+	if result.Products[0].ReviewSummary == nil {
+		t.Fatalf("reviews should be automatically included in products")
+	}
+	if result.Products[0].ReviewSummary.TotalRating != 4.5 {
+		t.Fatalf("unexpected review rating: %f", result.Products[0].ReviewSummary.TotalRating)
+	}
 	if backend.searchReq.Query != "TV" || backend.searchReq.MinPrice == nil || *backend.searchReq.MinPrice != 100 {
 		t.Fatalf("unexpected request: %+v", backend.searchReq)
 	}
@@ -65,17 +71,9 @@ func TestRunSearchBlogSummarizesArticleList(t *testing.T) {
 	}
 }
 
-func TestRunErrorShapes(t *testing.T) {
-	registry := New(&fakeBackend{err: errors.New("blocked")})
-	result, err := registry.Run(context.Background(), "search_reviews", Args{ProductID: "1"})
-	if err != nil {
-		t.Fatalf("Run() error = %v", err)
-	}
-	if result.Error == "" {
-		t.Fatalf("expected safe error result: %+v", result)
-	}
-
-	result, err = registry.Run(context.Background(), "cite_blog_source", Args{Title: "T", URL: "https://www.mvideo.ru/blog/x"})
+func TestRunCiteBlogSource(t *testing.T) {
+	registry := New(&fakeBackend{})
+	result, err := registry.Run(context.Background(), "cite_blog_source", Args{Title: "T", URL: "https://www.mvideo.ru/blog/x"})
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}

@@ -2,17 +2,18 @@ package catalog
 
 // Product is the public product card contract returned to the frontend.
 type Product struct {
-	ID       string  `json:"id"`
-	Title    string  `json:"title"`
-	Price    int     `json:"price"`
-	OldPrice *int    `json:"oldPrice,omitempty"`
-	Rating   float64 `json:"rating"`
-	Reviews  int     `json:"reviews"`
-	Image    string  `json:"image"`
-	URL      string  `json:"url"`
-	Stock    Stock   `json:"stock"`
-	Margin   *int    `json:"margin,omitempty"`
-	Category string  `json:"category"`
+	ID            string         `json:"id"`
+	Title         string         `json:"title"`
+	Price         int            `json:"price"`
+	OldPrice      *int           `json:"oldPrice,omitempty"`
+	Rating        float64        `json:"rating"`
+	Reviews       int            `json:"reviews"`
+	Image         string         `json:"image"`
+	URL           string         `json:"url"`
+	Stock         Stock          `json:"stock"`
+	Margin        *int           `json:"margin,omitempty"`
+	Category      string         `json:"category"`
+	ReviewSummary *ReviewSummary `json:"reviewSummary,omitempty"`
 }
 
 // Stock describes M.Video product availability.
